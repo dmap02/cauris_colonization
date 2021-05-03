@@ -9,17 +9,27 @@ Stanley2, Pamela B Bell2, Sangeetha Baskaran2, Clay Deming1, Qiong Chen1, Sean C
 
 1Microbial Genomics Section, Translational and Functional Genomics Branch, National Human Genome
 Research Institute, National Institutes of Health, Bethesda, MD 20892, USA
+
 2 Department of Internal Medicine, Division of Infectious Diseases, Rush University Medical Center,
 Chicago, IL 60612, USA.
+
 3Mycotic Diseases Branch, Centers for Disease Control and Prevention, Atlanta, GA 30333, USA.
+
 4NIH Intramural Sequencing Center, National Human Genome Research Institute, National Institutes of Health, Bethesda, MD 20892, USA.
+
 5Division of Healthcare Quality Promotion, NCEZID, CDC, USA
+
 6Communicable Disease Program, Chicago Department of Public Health, Chicago, IL, 60612, USA.
+
 7Dermatology Branch, National Institute of Arthritis and Musculoskeletal and Skin Diseases, National
 Institutes of Health, Bethesda, MD 20892, USA
+
 8College of Nursing, Rush University, Chicago, IL 60612, USA.
+
 9These authors contributed equally: Julia A Segre and Mary K Hayden.
 *e-mail: jsegre@nhgri.nih.gov; mhayden@rush.edu
+
+
 
 
 
