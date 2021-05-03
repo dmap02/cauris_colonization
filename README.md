@@ -7,29 +7,27 @@
 Authors: Diana M Proctor1, Thelma Dangana2, D. Joseph Sexton3, Christine Fukuda2, Rachel D Yelin2, Mary
 Stanley2, Pamela B Bell2, Sangeetha Baskaran2, Clay Deming1, Qiong Chen1, Sean Conlan1, Morgan Park4, NISC Comparative Sequencing Program4, Rory M Welsh3, Snigdha Vallabhaneni3,5, Tom Chiller3, Kaitlin Forsberg3, Stephanie R. Black6, Massimo Pacilli6, Heidi H Kong7, Michael Y Lin2, Michael E Schoeny8, Anastasia P Litvintseva3, Julia A Segre1,9*, Mary K Hayden2,9*
 
-1Microbial Genomics Section, Translational and Functional Genomics Branch, National Human Genome
-Research Institute, National Institutes of Health, Bethesda, MD 20892, USA
+    1Microbial Genomics Section, Translational and Functional Genomics Branch, National Human Genome
+    Research Institute, National Institutes of Health, Bethesda, MD 20892, USA
 
-2 Department of Internal Medicine, Division of Infectious Diseases, Rush University Medical Center,
-Chicago, IL 60612, USA.
+    2 Department of Internal Medicine, Division of Infectious Diseases, Rush University Medical Center,
+    Chicago, IL 60612, USA.
 
-3Mycotic Diseases Branch, Centers for Disease Control and Prevention, Atlanta, GA 30333, USA.
+    3Mycotic Diseases Branch, Centers for Disease Control and Prevention, Atlanta, GA 30333, USA.
 
-4NIH Intramural Sequencing Center, National Human Genome Research Institute, National Institutes of Health, Bethesda, MD 20892, USA.
+    4NIH Intramural Sequencing Center, National Human Genome Research Institute, National Institutes of Health, Bethesda, MD 20892, USA.
 
-5Division of Healthcare Quality Promotion, NCEZID, CDC, USA
+    5Division of Healthcare Quality Promotion, NCEZID, CDC, USA
 
-6Communicable Disease Program, Chicago Department of Public Health, Chicago, IL, 60612, USA.
+    6Communicable Disease Program, Chicago Department of Public Health, Chicago, IL, 60612, USA.
 
-7Dermatology Branch, National Institute of Arthritis and Musculoskeletal and Skin Diseases, National
-Institutes of Health, Bethesda, MD 20892, USA
+    7Dermatology Branch, National Institute of Arthritis and Musculoskeletal and Skin Diseases, National
+    Institutes of Health, Bethesda, MD 20892, USA
 
-8College of Nursing, Rush University, Chicago, IL 60612, USA.
+    8College of Nursing, Rush University, Chicago, IL 60612, USA.
 
-9These authors contributed equally: Julia A Segre and Mary K Hayden.
-*e-mail: jsegre@nhgri.nih.gov; mhayden@rush.edu
-
-
+    9These authors contributed equally: Julia A Segre and Mary K Hayden.
+    *e-mail: jsegre@nhgri.nih.gov; mhayden@rush.edu
 
 
 
