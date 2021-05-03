@@ -1,0 +1,828 @@
+---
+title: "Figure 4: fungal communities, dominated by Malassezia and Candida species,  of surveilled body sites, have differential stability, resilience and likelihood of invasion by Candida auris. "
+author: "Diana Proctor"
+date: "05/12/2020"
+output: html_document
+---
+last updated: `r format(Sys.Date(), format="%B %d %Y")`
+
+
+**draft: submission to Nature Medicine October 2020**
+
+
+*Manuscript Title*: Integrated genomic, epidemiologic investigation of endemic Candida auris skin colonization 
+
+*Authors*:Diana M Proctor1, Thelma Dangana2, David Joseph Sexton3, Christine Fukuda2, Mary Stanley2, Pamela Bell2, Sangeetha Baskaran2, Clay Deming1, Qiong Chen1, Sean Conlan1, NISC Comparative Sequencing Program4, Rory M Welsh3, Snigdha Vallabhaneni3,5, Tom Chiller3, Heidi H Kong6, Michael Schoeny7, Michael Y Lin2, Anastasia P Litvintseva3, Julia A Segre1, Mary K Hayden2
+
+*Affiliations*:
+
+- 1Microbial Genomics Section, Translational and Functional Genomics Branch, National Human Genome Research Institute, National Institutes of Health, Bethesda, MD 20892, USA
+
+- 2 Department of Internal Medicine, Division of Infectious Diseases, Rush University Medical Center, Chicago, IL 60612, USA.
+
+- 3Mycotic Diseases Branch, Centers for Disease Control and Prevention, Atlanta, GA 30333, USA.
+
+- 4NIH Intramural Sequencing Center, National Human Genome Research Institute, National Institutes of Health, Bethesda, MD 20892, USA.
+
+- 5Division of Healthcare Quality Promotion, NCEZID, CDC, USA
+
+- 6Dermatology Branch, National Institute of Arthritis and Musculoskeletal and Skin Diseases, National Institutes of Health, Bethesda, MD 20892, USA
+
+- 7Department of Nursing, Rush University Medical Center, Chicago, , IL 60612, USA.
+
+
+### Description of the dataset
+
+Here, we examine the structure and dynamics of the mycobiome, using the ITS1 data set. We filter to remove ASVs that have fewer than 10 reads, as well as species that cannot be assigned to a taxonomic rank beyond the division level. The entire data object has 134 species distributed across 1115 samples.
+
+For the CST specific analysis, we subset on the sites that have the highest sequencing depth, as well as the most paired samples for individual subjects. A total of 17 subjects have T1 and T2 samples for the sites: c("Fg", "Tw", "N", "Ic")).
+
+To accomplish this, we read in the following data:
+
+1. its_match.rds
+
+### Here, we render the following figures:
+
+1. Figure 4
+
+***
+
+Load libraries and set plotting preferences
+ 
+```{r global_options}
+library(knitr)
+opts_chunk$set(fig.width=12, fig.height=8, 
+               echo=TRUE, warning=FALSE, message=FALSE, error = FALSE)
+```
+
+
+```{r}
+library(phyloseq);
+library(ggplot2);
+library(magrittr);
+library(reshape2);
+library(gridExtra);
+library(viridis);
+library(gridExtra);
+library(stringr);
+library(cowplot);
+library(ggpubr);
+library(ggalt);
+library(vegan);
+library(scales) 
+library(markovchain)
+library(knitr)
+library(gridGraphics)
+library(wesanderson)
+
+#set theme
+theme_set(theme_bw())
+
+
+#cluster analysis, takes two arguments
+#x: is the distance matrix
+#k: is the number of clusters
+mypam = function(x, k) {
+        pam(x, k, diss=TRUE, stand=FALSE)
+}
+
+```
+
+read in the data set
+```{r}
+phy = readRDS(file="~/Desktop/candida_auris_rush/its_match_CDI-out.rds") %>%
+      subset_taxa(., Highest.Rank != "Less_than_10_per_ASV Less_than_10_per_ASV") %>%
+      subset_taxa(., Highest.Rank != "Fungal sp.") 
+
+tax = data.frame(phy@tax_table@.Data) 
+taxa_names(phy) = tax$Seq
+write.csv(tax, "~/Desktop/candida_auris_rush/its_match_CDI-out-tax_uncorrected.csv")
+
+tax = read.csv("~/Desktop/candida_auris_rush/its_match_CDI-out-tax_corrected.csv")
+rownames(tax) = tax$X
+tax = as.matrix(tax) %>%
+  tax_table(.)
+tax_table(phy) = tax
+
+#update taxa names to highest rank
+tax = data.frame(phy@tax_table@.Data)
+new.names = tax$Highest.Rank
+taxa_names(phy) = new.names
+
+
+```
+
+
+#### Create a data subset for subjects who have matched samples for the following 4 sites:
+
+- identify subjects who have 4 samples at t1 and t2 with: c("Fg", "Tw", "N", "Ic"))
+- 17 subjects and if we require An then this drops
+- minimum number of samples is 459, median 22,294 and Max is 278K.
+
+```{r}
+### get the list of subjects who have paired samples at t1 and t2 with: c("Fg", "Tw", "N", "Ic"))
+test = phy %>%
+      subset_taxa(., Highest.Rank != "Less_than_10_per_ASV Less_than_10_per_ASV") %>%
+      subset_taxa(., Highest.Rank != "Fungal sp.") %>%
+      subset_samples(., SiteID %in% c("Fg", "Tw", "N", "Ic")) %>%
+      sample_data(.) %>% 
+      subset(., Survey_Period %in% c(1, 2)) %>%
+      as.data.frame(.)
+
+#get the list of subjects
+counts = data.frame(table(test$Unique_ptid)) %>%
+  subset(., Freq ==8) %>%
+  dplyr::select(., Var1)
+
+
+#subset the phyloseq object on these subjects
+subjects2keep = as.vector(counts$Var1)
+time  =  subset_samples(phy, Unique_ptid %in% subjects2keep)
+
+
+#initial analysis was done with all genera
+limphy = phy %>%
+      subset_taxa(.,  Genus %in% c("g__Malassezia", "g__Candida")) %>%
+      tax_glom(., "Species") %>%
+      transform_sample_counts(., function(x) x/sum(x))  %>% 
+      subset_samples(., SiteID %in% c("Fg", "Tw", "N", "Ic"))
+  
+  
+
+```
+
+#### Figure 4A: Principal coordinates analysis of the Weighted Unifrac metric of the fungal community at each body site (Tw, Fg, Ic, N).  
+
+Samples are shaded according to cluster identity, as revealed by partition around medoids analysis. Cluster 1 tends to be dominated by Malassezia restricta (N=252, 52.2%), Cluster 2 by Malassezia slooffiae (N=60, 12.4%), Cluster 3 by divers Candida species (N=61, 12.6%), and Cluster 4 by Candida auris (N=110, 22.8%). Community state types (CST) are identified by the gap statistic computed on a partition around medoids analysis. Segregation of Malassezia and Candida species across the first axis explains 62% of the variance. Candida species segregate across the second major axis, which accounts for ~15% of the variance.  
+
+```{r}
+#plot a pcoa of the correlation matrix
+set.seed(987)
+wuf =  phyloseq::distance(limphy, method="wunifrac")
+wuf  = as.matrix(wuf)
+
+library(RColorBrewer)
+k=4
+CSTColors <- brewer.pal(5,"Paired")[2:5]
+names(CSTColors) <- 1:k
+pm <- cluster::pam(wuf, diss=TRUE, k=k)
+
+matPCOA <- ape::pcoa(wuf)
+pcoa.df <- data.frame(pm$clustering, matPCOA$vectors, sample_data(limphy))
+colnames(pcoa.df)[1] <- "Cluster"
+pcoa.df$Cluster <- as.factor(pcoa.df$Cluster)
+
+pcoa.df$SiteID = plyr::revalue(pcoa.df$SiteID,
+                        c("An" = "Peri-anal",
+                          "Ax"= "Axilla",
+                          "Bu/To" = "Buccal Mucosa / Tongue",
+                          "Ea" = "Ear Canal",
+                          "Fg" = "Fingertips",
+                          "Ic" = "Inguinal crease",
+                          "N" = "Anterior nares",
+                          "Ne" = "Neck",
+                          "Tc" = "Tracheostomy site",
+                          "Tw" = "Toeweb"))
+
+
+
+
+#how much of the variance does each axis explain?
+eig <- matPCOA$values
+ExplainedVariance = 100*(eig$Eigenvalues/sum(eig$Eigenvalues))
+ExplainedVariance[1:10]
+
+replacement.map <- data.frame(pm$clustering,sample_data(limphy))
+colnames(replacement.map)[1] <- "Cluster"
+
+###### plot the pcoa coloring samples by the cluster number vs. sites
+replacement.map$Cluster <- as.factor(replacement.map$Cluster)
+replacement.map = sample_data(replacement.map)
+sample_data(limphy) = replacement.map
+sample_data(limphy) = replacement.map
+sample_data(phy) = replacement.map
+
+#### unifrac PCoA
+ord = transform_sample_counts(limphy, function(x) x/sum(x)) %>%
+      ordinate(.,  method="PCoA", distance="wunifrac") 
+evals = 100*(ord$values$Eigenvalues/sum(ord$values$Eigenvalues))
+
+### Plot ordination
+p = plot_ordination(limphy, ord, type="biplot", color="Cluster")  
+
+myannotations = subset(p$data, Highest.Rank %in% 
+                         c("Malassezia globosa", "Malassezia restricta",
+                         "Malassezia slooffiae", "Candida tropicalis", "Candida parapsilosis",
+                         "Candida albicans", "Candida orthopsilosis",    "Candida glabrata",
+                         "Candida auris"  ))
+Figure4a = ggplot()   +
+      theme_classic()  +
+      geom_point(data=subset(p$data, Cluster != "Taxa"), 
+                 aes(x=Axis.1, y=Axis.2, size=4, alpha=0.8, color=Cluster)) +
+      scale_color_manual(values=CSTColors) +
+      ggrepel::geom_label_repel(data=myannotations, 
+                                mapping = aes(x=Axis.1, y=Axis.2, label = Highest.Rank), size = 4,
+                                box.padding=0.05, alpha=0.8, color="black") + 
+      coord_fixed(sqrt(evals[2] / evals[1]))  +
+      xlab(paste0("Axis1: ", round(evals[[1]], 2), "%"))+
+      ylab(paste0("Axis2: ", round(evals[[2]], 2), "%"))+
+      theme(plot.title = element_text(size=20),
+      axis.title.x = element_text(size=20),
+      axis.title.y = element_text(size=20),
+      text = element_text(size=20), axis.text.x = element_text(angle=0, hjust=1))  +
+  guides(shape=FALSE, alpha=FALSE, size=FALSE)
+
+Figure4a
+ggsave(Figure4a, file="~/Desktop/proctor_manuscript/Figure4/Figure4a.pdf", device="pdf", width = 8, height = 5)
+
+```
+
+
+
+#### Figure 4B: Heatmaps of the relative abundance of the top 20 species in each sample, clustered by CST. 
+
+B) Heatmaps of the relative abundance of the top 20 species in each sample, clustered by CST.  Shading is based on the relative abundance of taxa within each sample. 
+
+```{r}
+keep = names(sort(taxa_sums(phy), TRUE)[1:20])
+
+top20=prune_taxa(keep, phy) %>%
+    prune_samples(sample_sums(.)>0, .)
+
+
+taxa_names(top20) = data.frame(top20@tax_table@.Data)$Highest.Rank
+
+italicsy <- element_text(face = "italic", size = 20)
+
+
+
+#set up a loop to get OTU abundances across sites within cluters
+clusts <- 1:k
+clust.list <- vector("list", length(clusts))
+names(clust.list) <- clusts
+clust.phys <- vector("list", length(clusts))
+names(clust.phys) <- clusts
+taxa.order <- names(sort(taxa_sums(phy)))
+plot_heatmap_by_cluster <- function(clustDf, phy, clustN, label) {
+        clustn = subset(clustDf, Cluster==clustN)
+        CS1 = as.vector(rownames(clustn))
+        CS1.phys <- prune_samples(CS1, phy) %>%
+                  prune_taxa(taxa_sums(.) > 0 , .) %>%
+                  prune_samples(sample_sums(.) > 0 , .) %>%
+                  transform_sample_counts(., function(x) 100*round(x/sum(x), 2))
+        p  =  plot_heatmap(CS1.phys, taxa.label="Highest.Rank", taxa.order=taxa.order) +
+              ggtitle(paste("CST ", clustN, ": ", label)) +
+              theme(axis.text.x=element_blank(),
+              axis.ticks.x=element_blank(),
+              axis.title.y = element_text(color="black", size=16, face="bold"),
+              text = element_text(size=12), axis.text.y = element_text(angle=0, hjust=1)) +
+              ylab("") + theme(legend.position="none") + xlab("")
+}
+
+
+c1 = plot_heatmap_by_cluster(clustDf=pcoa.df, 
+                             phy=top20, clustN=1, label="Malassezia diverse")  +
+   theme( axis.text.y = italicsy) 
+c2 = plot_heatmap_by_cluster(clustDf=pcoa.df, 
+                             phy=top20, clustN=2, label="Candida diverse   ") + 
+        theme(axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank())
+c3 = plot_heatmap_by_cluster(clustDf=pcoa.df, 
+                             phy=top20, clustN=3, label="Malassezia sloofiae") + 
+        theme(axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank())
+
+c4 = plot_heatmap_by_cluster(clustDf=pcoa.df, 
+                             phy=top20, clustN=4, label="Candida auris    ") + 
+        theme(axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank())
+
+plot_legend <- function(clustDf, phy, clustN, label) {
+        clustn = subset(clustDf, Cluster==clustN)
+        CS1 = as.vector(rownames(clustn))
+        CS1.phys <- prune_samples(CS1, phy) %>%
+                  prune_taxa(taxa_sums(.) > 0 , .) %>%
+                  prune_samples(sample_sums(.) > 0 , .) %>%
+                  transform_sample_counts(., function(x) 100*round(x/sum(x), 2))
+        p  =  plot_heatmap(CS1.phys, taxa.label="Highest.Rank", taxa.order=taxa.order) +
+              ggtitle(paste("CST ", clustN, ": ", label)) +
+              theme(axis.text.x=element_blank(),
+              axis.ticks.x=element_blank(),
+              axis.title.y = element_text(color="black", size=16, face="bold"),
+              text = element_text(size=12), axis.text.y = element_text(angle=0, hjust=1)) +
+              ylab("") + xlab("")
+}
+
+c5 = plot_legend(clustDf=pcoa.df, phy=top20, clustN=2, label="Candida auris    ") + 
+        theme(axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank())
+
+fig4blegend <- cowplot::get_legend(c5)
+
+Figure4B <- ggarrange((c1 + theme(legend.position = "none")),
+                       (c2 + theme(legend.position = "none")),
+                       (c3 + theme(legend.position = "none")), 
+                       (c4 + theme(legend.position = "none")), ncol=4, widths = c(1.75, 1, 1, 1))
+
+
+
+
+Figure4b <- cowplot::plot_grid(Figure4B, fig4blegend, nrow = 1, rel_widths = c(1,.1))
+ggsave(Figure4b, file="~/Desktop/proctor_manuscript/Figure4/Figure4b.png",  width = 12, height = 8, units ="in",dpi = 300, device = "png")
+ggsave(Figure4b, file="~/Desktop/proctor_manuscript/Figure4/Figure4b.pdf",  width = 14, height = 8, units ="in",dpi = 300, device = "pdf")
+ggsave(Figure4b, file="~/Desktop/proctor_manuscript/Figure4/Figure4b.png",  width = 18, height = 8, units ="in",dpi = 300, device = "png")
+
+Figure4b
+
+```
+
+#### Figure 4C
+
+C) Self and inter-state transition probabilities inferred for samples of the toeweb, fingertips, inguinal crease, and  nares. 
+
+```{r}
+sample_data(limphy)$CST = paste0("CST", sample_data(limphy)$Cluster)
+
+
+t1p = subset_samples(limphy, Survey_Period !="3") %>%
+  subset_samples(., Unique_ptid %in% subjects2keep)
+counts = data.frame(table(sample_data(t1p)$Unique_ptid))
+colnames(counts) = c("Unique_ptid", "NSamplesPerSubject") 
+sample_data(t1p)$NSamplesPerSubject = 8
+
+t1 = subset_samples(t1p, Survey_Period==1)
+t2 = subset_samples(t1p, Survey_Period==2)
+states_by_subject_t1 = table(sample_data(t1)$Cluster, sample_data(t1)$Unique_ptid)
+states_by_subject_t2 = table(sample_data(t2)$Cluster, sample_data(t2)$Unique_ptid)
+
+
+#we'll look here at what samples are in each cst
+p = data.frame(sample_data(phy)) %>%
+    ggplot(., aes(as.factor(Survey_Period), SiteID, color=Cluster)) + geom_point() +
+            theme_bw()+ facet_wrap(~Unique_ptid)+ 
+            scale_colour_manual(name = "CST", values = CSTColors[1:5])
+
+#p
+
+#let's get the counts of samples within each cst
+tab = table(p$data$Site.Extended, p$data$Cluster)
+Coltots = 100*(colSums(tab) / sum(colSums(tab)))
+tots = colSums(tab)
+```
+
+Calculate transition probabilities and initial states for the complete dataset
+
+```{r}
+###generate CSTS
+set.seed(87)
+k=4
+CSTs = c("CST1", "CST2", "CST3", "CST4")
+
+df  = data.frame(sample_data(t1p))  %>%
+  dplyr::select(Unique_ptid, Cluster,  Survey_Period, SiteID) %>%
+  dcast(., Unique_ptid+SiteID~Survey_Period,value.var="Cluster")
+
+
+colnames(df)[3:4] = c("t1", "t2")
+df = dplyr::select(df, c("t1", "t2"))
+
+#save this df to dfSummary
+dfSummary = df
+tab = table(df$t1, df$t2) # t1=row, t2=columns
+tab = as.matrix(tab)
+all.trans <- matrix(tab, nrow=k, ncol=k)
+all.trans =  all.trans/rowSums(all.trans)  # Normalize row sums to 1; divide by prior state
+all.trans[is.nan(all.trans)] = 0
+
+all.init = table(df$`t1`)
+all.init = c(all.init) #total 92
+all.two = table(df$`t2`) #total 92
+```
+
+print the probability transition matrix
+```{r}
+#print(all.trans)
+```
+
+print the initial matrix, the number of samples in each state from t1 to t2
+
+- 92 total
+```{r}
+#all.init
+```
+
+Figure 4C: Self and inter-state transition probabilities inferred for samples of the toeweb, fingertips, inguinal crease, and  nares. 
+
+```{r}
+rownames(all.trans)=CSTs
+colnames(all.trans)=CSTs
+
+# Make Markov chain object
+set.seed(789)
+mcAll <- new("markovchain", states = CSTs, byrow = TRUE,
+             transitionMatrix = all.trans, name = "All Sites")
+
+
+plot_transition_matrix <- function(M, site){
+    RoundedM = apply(M, 1, function(x) round(x, 2))
+    diagram::plotmat(RoundedM , pos=c(2, 2),
+        lwd = 0.7, box.lwd = 0.6, 
+        shadow.size = 0.001, shadow.col = "grey", dr = 0.008, 
+        name=CSTs,
+        cex.txt = 1.2, 
+        box.size = 0.1, 
+        box.type = "circle", 
+        box.prop = 0.3,
+        box.col = CSTColors,
+        arr.length=.2,
+        arr.width=0.1,
+        self.lwd = .8,
+        self.cex = .5,
+        self.shifty = -.02,
+        self.shiftx = .13,
+        main = paste0(site), cex=3)
+
+}
+
+plot_transition_matrix(M=all.trans, site="")
+```
+
+
+save the plot to eps
+```{r, eval=TRUE}
+setEPS()
+postscript("~/Desktop/proctor_manuscript/Figure4/Figure4c.eps")
+plot_transition_matrix(M=all.trans, site="")
+dev.off()
+```
+
+
+
+
+#### Figure 4D: Scatterplot of the predicted numbers of samples in each CST at 3, 6, and 12 months post sample collection compared to the actual number of samples at 3 months. 
+
+Predictions were generated using the Markov chain in panel c.
+
+Note: we have 77 samples in the third time point, so we've lost some samples. We'll normalize the projected and actual values to account for this disparity to see how well the model projects the number of samples in each cst.
+
+
+```{r}
+
+# the predicted number of subjects in each state at time point 1
+after2Months <-   all.init * (t(mcAll) * t(mcAll)) 
+after3Months <-   all.init *  (mcAll ^ 3)
+after3Months 
+after7Months <-   all.init *  (mcAll ^ 7)
+after12Months <-   all.init *  (mcAll ^ 12)
+after12Months
+
+after24Months <-   all.init *  (mcAll ^ 24)
+after24Months
+
+after36Months <-   all.init *  (mcAll ^ 36)
+after36Months
+
+```
+
+
+The predictions are off because we have 77 samples at time point 3 for these sites, but we have 92 samples for the projections
+
+
+```{r}
+#how many samples are there in each state at time 3
+#drop the sites that are missing alot of samples across subjects
+
+#drop specific subjects
+t3 = subset_samples(limphy, Unique_ptid %in% subjects2keep) 
+df = data.frame(sample_data(t3))
+t3 = subset(df, Survey_Period=="3")
+actual =  table(t3$CST)
+
+
+
+# the predicted number of subjects in each state at time point 1
+after3Months <-   all.init *  (mcAll ^ 3) 
+after6Months <-   all.init *  (mcAll ^ 6)
+after12Months <-   all.init *  (mcAll ^ 12)
+
+df = data.frame(rbind(actual, after3Months,  after6Months, after12Months))
+rownames(df) = c("Actual at 3 Months", "Predicted at 3 Months",  
+                 "Predicted at 6 Months" ,"Predicted at 12 Months")
+
+df$Class = rownames(df)
+dfm = melt(df, id.vars = "Class")
+
+cbbPalette <- c("#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+df$Class = rownames(df)
+dfm = melt(df, id.vars = "Class")
+
+#figure 4d
+Figure4d = ggplot(dfm, aes(variable, value, color=Class)) + 
+  geom_jitter(size=6, alpha=0.6, width = 0.09) + 
+  scale_color_manual(values=cbbPalette)+ theme(axis.text = element_text(size = 14))  +
+  ylab("Number of Samples") + xlab("CST") + theme(axis.title = element_text(size = 20)) + ylim(0, 60)
+Figure4d+
+      theme(aspect.ratio = 2/1)
+
+ggsave(Figure4d, file="~/Desktop/proctor_manuscript/Figure4/Figure4d.pdf", device="pdf", width = 5, height = 5)
+```
+
+
+### Look at transitions from CST1
+
+```{r}
+df  = data.frame(sample_data(t1p))  %>%
+  dplyr::select(Unique_ptid, Cluster,  Survey_Period, SiteID) %>%
+  dcast(., Unique_ptid+SiteID~Survey_Period,value.var="Cluster")
+
+colnames(df)[3:4] = c("t1", "t2")
+unstable.df =  subset(df, t1=="4" & t2  !="4")
+unstable.df$Table.MatcherT1 = paste0(unstable.df$Unique_ptid,";" ,unstable.df$SiteID,";" ,1)
+unstable.df$Table.MatcherT2 = paste0(unstable.df$Unique_ptid,";" ,unstable.df$SiteID,";" ,2 )
+
+keep1 = unstable.df$Table.MatcherT1
+keep2 = unstable.df$Table.MatcherT2
+keep =  c(keep1,  keep2)
+
+sample_data(t1p)$Table.MatcherT1 = paste0(sample_data(t1p)$Unique_ptid,";" ,
+                                              sample_data(t1p)$SiteID,";" ,
+                                              sample_data(t1p)$Survey_Period)
+test = subset_samples(t1p, Table.MatcherT1 %in% keep)
+    df = data.frame(otu_table(test), sample_data(test))
+    
+    p1 = ggplot(df, aes(Survey_Period, Candida.auris, 
+                        group=Unique_ptid, color=as.factor(Unique_ptid), shape=CST)) + 
+          geom_point(size=4)  + geom_line() +   
+          facet_wrap(~SiteID, ncol=5) +
+          scale_x_discrete(breaks=c(1, 2), labels=c(1,2))  + ylab("") +  xlab("") +
+           theme(legend.position="bottom") + ggtitle("Cauris relative Abundance")
+       
+    
+#get a plot of  the malassezia/candida  index
+tax = data.frame(test@tax_table@.Data)
+    tax = dplyr::select(tax, c("Family", "Genus"))  
+    tax = as.matrix(tax)
+    tax = tax_table(tax)    
+    tax_table(test) = tax
+    genusTest = tax_glom(test, "Genus")
+    df = data.frame(otu_table(genusTest), sample_data(genusTest))
+    df$index  = df$Malassezia.restricta/df$Candida.auris
+
+    
+    p2 = ggplot(df, aes(Survey_Period, index, 
+                        group=Unique_ptid, color=as.factor(Unique_ptid), shape=CST)) +
+          geom_point(size=4)  + geom_line() +   
+          facet_wrap(~SiteID, ncol=5) +
+          scale_x_discrete(breaks=c(1, 2), labels=c(1,2))   + ylab("") + xlab("") +
+          ggtitle("Malassezia / Candida Ratio")
+      
+
+    
+  
+#look at diversity    
+df = data.frame(sample_data(test), estimate_richness(test, measures="Shannon"))
+    
+    p4 = ggplot(df, aes(Survey_Period, Shannon, 
+                        group=Unique_ptid, color=as.factor(Unique_ptid), shape=CST)) +
+          geom_point(size=4)  + geom_line() +   
+          facet_wrap(~SiteID, ncol=5) +
+          scale_x_discrete(breaks=c(1, 2), labels=c(1,2))  + ylab("Shannon  Diversity")+
+          ylab("") + xlab("") +
+          ggtitle("Shannon Diversity") +
+          scale_color_discrete(name = "Subject")
+
+
+SupplementalFigureX1 <- ggarrange((p1 + theme(legend.position = "none")),
+                       (p4 + theme(legend.position = "none")), ncol = 1)
+
+SupplementalFigureX1_legend <- cowplot::get_legend(p4)
+
+SupplementalFigureX1 <- cowplot::plot_grid(SupplementalFigureX1, SupplementalFigureX1_legend, nrow = 1, rel_widths = c(1,.3))
+SupplementalFigureX1
+```
+
+
+what happens to the bacterial community when you transition away from cauris domination
+
+- make a column for time point 2 that is in cst4
+- 
+
+
+```{r}
+
+t1.keep = paste0("Subject_", unstable.df$Unique_ptid, ";",
+                 "Site_", unstable.df$SiteID, ";",
+                 "Survey_1")
+t2.keep = paste0("Subject_", unstable.df$Unique_ptid, ";",
+                 "Site_", unstable.df$SiteID, ";",
+                 "Survey_2")
+
+samples2keep = c(t1.keep, t2.keep)
+
+bac_match = readRDS(file="~/Desktop/candida_auris_rush/merged_16s_bac_match_cauris_clinical_map_withsqrt_withtree_withcoo_2020-03-19.rds") %>%
+  subset_samples(., Fungal.Matcher %in% samples2keep) %>%
+  prune_taxa(taxa_sums(.) > 0, .)
+
+map = data.frame(sample_data(test)) %>%
+  dplyr::select(., c("Fungal.Matcher", "Cluster"))
+
+new.map = plyr::join(map, data.frame(sample_data(bac_match)))
+rownames(new.map) = new.map$Fungal.Matcher
+sample_data(bac_match) = sample_data(new.map) 
+
+df  = data.frame(sample_data(bac_match))  %>%
+  dplyr::select(Unique_ptid, Cluster,  Survey_Period, SiteID) %>%
+  dcast(., Unique_ptid+SiteID~Survey_Period,value.var="Cluster")
+
+colnames(df)[3:4] = c("t1", "t2")
+unstable.df =  subset(df, t1=="4" & t2  !="4")
+unstable.df$Table.MatcherT1 = paste0(unstable.df$Unique_ptid,";" ,unstable.df$SiteID,";" ,1)
+unstable.df$Table.MatcherT2 = paste0(unstable.df$Unique_ptid,";" ,unstable.df$SiteID,";" ,2 )
+
+keep1 = unstable.df$Table.MatcherT1
+keep2 = unstable.df$Table.MatcherT2
+keep =  c(keep1,  keep2)
+
+sample_data(bac_match)$Table.MatcherT1 = paste0(sample_data(bac_match)$Unique_ptid,";" ,
+                                              sample_data(bac_match)$SiteID,";" ,
+                                              sample_data(bac_match)$Survey_Period)
+test2 = subset_samples(bac_match, Table.MatcherT1 %in% keep)
+    df = data.frame(otu_table(test2), sample_data(test2))
+
+    
+
+
+#look at diversity    
+df = data.frame(sample_data(test2), estimate_richness(test2, measures="Shannon"))
+    
+    p4 = ggplot(df, aes(Survey_Period, Shannon, 
+                        group=Unique_ptid, color=as.factor(Unique_ptid), shape=Cluster)) +
+          geom_point(size=4)  + geom_line() +   
+          facet_wrap(~SiteID, ncol=5) +
+          scale_x_discrete(breaks=c(1, 2), labels=c(1,2))  + ylab("Shannon  Diversity")+
+          ylab("") + xlab("") +
+          ggtitle("Shannon Diversity") +
+          scale_color_discrete(name = "Subject")
+
+sample_data(test2)$glom_var = paste0(sample_data(test2)$Cluster,";" ,
+                                              sample_data(test2)$Survey_Period)
+  
+foo = merge_samples(test2, "glom_var") %>%
+  transform_sample_counts(., function(x) x/sum(x))
+p = plot_bar(foo, "Sample", "Abundance", fill="Phylum")
+dat = p$data
+ordering = c("4;1", "1;2", "2;2", "3;2")
+ISU_secondary_palette <- c("#3E4827", "#76881D", "#A2A569",
+                           "#003D4C", "#006BA6", "#7A99AC",
+                           "#7C2529", "#9A3324", "#BE531C",
+                           "#8B5B29", "#B9975B", "#EED484",
+                           "#6E6259", "#707372", "#ACA39A", "#C8102E")
+
+dat$Sample  <- factor(dat$Sample, levels = ordering)
+      p = ggplot(dat) +
+            geom_col(aes(x=Sample, y=Abundance, fill=Phylum), position="stack") + 
+            ylab("Relative Abundance") +   scale_color_manual(values=ISU_secondary_palette) +
+            scale_fill_manual(values=ISU_secondary_palette) + ylim(0, 1)+ 
+        scale_x_discrete(labels=c("4;1" = "CST4 at T1", 
+                                  "1;2" = "CST1 at T2",
+                                  "2;2" = "CST2 at T2",
+                                  "3;2" = "CST3 at T2"))
+      
+      
+
+```
+
+what happens to the individuals who are only transiently colonized
+- 25 smaples t1
+- 29 samples t2
+- 29 samples t3
+```{r}
+transient = subset_samples(limphy, outcome== "Transient Colonization") 
+
+
+df  = data.frame(sample_data(transient))  %>%
+  dplyr::select(Unique_ptid, Cluster,  Survey_Period, SiteID) %>%
+  dcast(., Unique_ptid+SiteID~Survey_Period,value.var="Cluster")
+
+colnames(df)[3:5] = c("t1", "t2", "t3")
+dfm = melt(df, id.vars = c("Unique_ptid", "SiteID"))
+dfm$complete = complete.cases(dfm$value)
+dfm = subset(dfm, complete==TRUE)
+
+p = ggplot(dfm, aes(variable, value, group=Unique_ptid, color=as.factor(Unique_ptid))) + facet_wrap(~SiteID) + geom_point() + geom_path()
+       
+trans.tab = data.frame(table(dfm$value, dfm$variable))
+trans.tab1 = subset(trans.tab, Var2=="t1")
+trans.tab1$Prop = trans.tab1$Freq/25
+
+trans.tab2 = subset(trans.tab, Var2=="t2")
+trans.tab2$Prop = trans.tab2$Freq/29
+
+trans.tab3 = subset(trans.tab, Var2=="t3")
+trans.tab3$Prop = trans.tab3$Freq/29
+
+transDF = data.frame(rbind(trans.tab1, trans.tab2, trans.tab3))
+transDF$Group = "Transient"
+p1 = ggplot(transDF, aes(Var1, Prop)) + geom_col() + facet_wrap(~Var2) + ggtitle("Transient") + ylim(0, 1)
+
+
+```
+
+```{r}
+transient = subset_samples(limphy, outcome== "Persistent Colonization") 
+
+
+df  = data.frame(sample_data(transient))  %>%
+  dplyr::select(Unique_ptid, Cluster,  Survey_Period, SiteID) %>%
+  dcast(., Unique_ptid+SiteID~Survey_Period,value.var="Cluster")
+
+colnames(df)[3:5] = c("t1", "t2", "t3")
+dfm = melt(df, id.vars = c("Unique_ptid", "SiteID"))
+dfm$complete = complete.cases(dfm$value)
+dfm = subset(dfm, complete==TRUE)
+
+
+
+persist.tab = data.frame(table(dfm$value, dfm$variable))
+persist.tab1 = subset(persist.tab, Var2=="t1")
+persist.tab1$Prop = persist.tab1$Freq/73
+
+persist.tab2 = subset(persist.tab, Var2=="t2")
+persist.tab2$Prop = persist.tab2$Freq/81
+
+persist.tab3 = subset(persist.tab, Var2=="t3")
+persist.tab3$Prop = persist.tab3$Freq/80
+
+persistDF = data.frame(rbind(persist.tab1, persist.tab2, persist.tab3))
+persistDF$Group = "Persistent"
+p2= ggplot(persistDF, aes(Var1, Prop)) + geom_col() + facet_wrap(~Var2)+ ggtitle("Persistent") + ylim(0, 1)
+
+grid.arrange(p1, p2, ncol=1)
+
+newdf = data.frame(rbind(transDF, persistDF)) %>%
+  subset(., Var2 %in% c("t1", "t3")) %>%
+  subset(., Var1 %in% c(1, 4))
+
+
+p = ggplot(newdf, aes(Var2, Prop, group=Var1, color=Var1))  + facet_wrap(~Group) + geom_point() + geom_line() +
+  ylab("Proportion of Samples in Each Group within Each CST") + geom_line()+
+  scale_color_manual(values=CSTColors, name = "CST") + 
+  scale_x_discrete(labels=c("t1" = "Start \nof Study", 
+                              "t3" = "End \nof Study"))+
+  theme_classic() + xlab("")+
+    theme(text = element_text(size=12),
+        axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 12),  
+        axis.title.x = element_text( size = 12),
+        axis.title.y = element_text( size = 12)) 
+
+
+
+```
+
+
+are the fingertips stably colonized over time
+```{r}
+site_codes = read.csv("~/Desktop/candida_auris_rush/sitecode_to_factored_sites.csv")
+data = read.csv("~/Desktop/candida_auris_rush/manuscript/data/Cauris_Analytic_2020-5-20.csv") %>%
+  dplyr::select(., c("Unique_ptid", "Survey_Period", "Cauris_Result", "site")) %>%
+  plyr::join(., site_codes)
+
+fingers = subset(data, SiteID=="Fg") 
+#look at the complete data  
+p = ggplot(fingers, aes(Survey_Period, Cauris_Result, group=Unique_ptid)) + facet_wrap(~Unique_ptid) + geom_point() + geom_line()
+#drop the single time point subjects N=11
+fingers1 = subset(fingers, !(Unique_ptid %in% c(6:10, 25, 30, 32, 49, 51, 56)))
+p = ggplot(fingers1, aes(Survey_Period, Cauris_Result, group=Unique_ptid)) + facet_wrap(~Unique_ptid) + geom_point() + geom_line()
+#drop those who werren't colonized at any timepoint (either 2 or 3) N=17
+fingers2 = subset(fingers1, !(Unique_ptid %in% c(1, 5, 11, 13, 20:22, 24, 29, 31, 34, 36, 41, 43:45, 50)))
+p = ggplot(fingers2, aes(Survey_Period, Cauris_Result, group=Unique_ptid)) + facet_wrap(~Unique_ptid) + geom_point() + geom_line()
+#ddrop those with only 2 tinmepoints
+fingers3 = subset(fingers2, !(Unique_ptid %in% c(19, 23, 52)))
+p = ggplot(fingers3, aes(Survey_Period, Cauris_Result, group=Unique_ptid)) + facet_wrap(~Unique_ptid) + geom_point() + geom_line()
+
+
+
+mylength=function(x) length(x)
+df = doBy::summaryBy(Cauris_Result~Unique_ptid, data=fingers3, FUN=c(sum, length))
+df$Percent = df$Cauris_Result.sum / df$Cauris_Result.length 
+ 
+df = data.frame(table(df$Cauris_Result.sum))
+p = ggplot(df, aes(Var1, Freq/26 )) + geom_col() + ylim(0, 1)
+
+
+
+```
+
+
+
+
+### What are the version numbers of all packages and ultilies used in this script?
+```{r}
+sessionInfo()
+```
