@@ -1,0 +1,956 @@
+---
+title: 'Figure 1: Calculating Sensitivity and Confidence Intervals'
+author: "Diana Proctor"
+date: "9/8/2020"
+output:
+  html_document: default
+  pdf_document: default
+---
+last updated: `r format(Sys.Date(), format="%B %d %Y")`
+
+***
+
+**draft: submission to Nature Medicine October 2020, Revised submission Feb 2021**
+
+*Manuscript Title*: Integrated genomic, epidemiologic investigation of Candida auris skin colonization in a skilled nursing facility 
+
+*Authors*: Diana M Proctor1, Thelma Dangana2, D. Joseph Sexton3, Christine Fukuda2, Rachel D Yelin2, Mary
+Stanley2, Pamela B Bell2, Sangeetha Baskaran2, Clay Deming1, Qiong Chen1, Sean Conlan1, Morgan Park4, NISC
+Comparative Sequencing Program4, Rory M Welsh3, Snigdha Vallabhaneni3,5, Tom Chiller3, Kaitlin
+Forsberg3, Stephanie R. Black6, Massimo Pacilli6, Heidi H Kong7, Michael Y Lin2, Michael E Schoeny8,
+Anastasia P Litvintseva3, Julia A Segre1+, Mary K Hayden2+
+
+
+*Affiliations*:
+
+- 1Microbial Genomics Section, Translational and Functional Genomics Branch, National Human Genome Research Institute, National Institutes of Health, Bethesda, MD 20892, USA
+
+- 2 Department of Internal Medicine, Division of Infectious Diseases, Rush University Medical Center, Chicago, IL 60612, USA.
+
+- 3Mycotic Diseases Branch, Centers for Disease Control and Prevention, Atlanta, GA 30333, USA.
+
+- 4NIH Intramural Sequencing Center, National Human Genome Research Institute, National Institutes of Health, Bethesda, MD 20892, USA.
+
+- 5Division of Healthcare Quality Promotion, NCEZID, CDC, USA
+
+- 6Communicable Disease Program, Chicago Department of Public Health, Chicago, IL, 60612, USA.
+
+- 7Dermatology Branch, National Institute of Arthritis and Musculoskeletal and Skin Diseases, National Institutes of Health, Bethesda, MD 20892, USA
+
+- 8College of Nursing, Rush University, Chicago, IL 60612, USA.
+
+- +Contributed equally
+
+
+
+#### Description of the dataset
+Here, we seek to evaluate the total body site occupancy of Candida auris on the body, as well as estimate prevalence (defined in this script as the proportion of all patients colonized using different combinations of body sites), as well as compute the sensitivity of each body site in capturing the percentage of patients who are colonized by Candida auris, at any body site. Sensitivity is defined as the estimated prevalence / number of colonized patients, according to any body site. We compute these estimates based on culture results for each of 57 patients.
+
+To accomplish this, we read in the following data:
+
+1. sitecode_to_factored_sites.csv
+2. Cauris_Analytic_2020-5-20.csv
+
+#### Here, we render the following figures:
+
+- Figure 1
+- Supplementary Figure 2: Ridgeline Plot of CFUs
+- Supplementary Figure 1: UpsetR plot of body site colonization patterns
+- Supplementary Figure 3: Paired MPN Analysis
+
+***
+
+Install and Load R packages
+
+```{r load packages, message=FALSE, warning=FALSE}
+ #load package method from from Dan Sprokett
+
+# set seed
+set.seed(78979)
+
+#define packages
+packages <- c("knitr", 
+              "tidyverse", 
+              "epiR", 
+              "viridis", 
+              "scales", 
+              "kableExtra", 
+              "UpSetR", 
+              "reshape2", 
+              "gridExtra", 
+              "phyloseq",
+              "wesanderson",
+              "harrypotter",
+              "ggridges",
+              "ggpubr",
+              "dabestr",
+              "ComplexHeatmap",
+              "scales",
+              "cowplot",
+              "Hmisc")
+
+# install packages from bioconductor
+BiocManager::install(setdiff(packages,installed.packages()), update=FALSE)
+n <- length(packages) - sum(sapply(packages,require,character.only=TRUE))
+
+# print if packages loaded properly
+if(n == 0){
+  print("All necessary R packages loaded properly")
+} else {
+  print(paste0(n, " R packages did not load properly"))
+}
+```
+
+define knitr options
+
+```{r}
+knitr::opts_chunk$set(echo=TRUE, warning=FALSE, message=FALSE, error = FALSE)
+```
+
+
+
+#### 1. Let's see how to compute prevalence estimates and confidence intervals using the epi.test pacckage
+
+We will use the epiR package to get the body site sensitivities for Candida auris colonization. 
+
+Compute the sensitivity of each body site for classification of colonization positive patients. Note that we do not have information for false negatives or false positives. We will use only information regarding true positives and true negatives in these calculations.
+
+We define a function that takes as input 3 arguments:
+
+- df is dataframe, having the columns (SiteID, Survey_Period); 
+- ref_sites is a vector of sites for which the sensitivity is being defined; 
+- time is the numeric survey period to analyze. 
+
+The output is a data frame with:
+
+- the fraction of sites that were positive (TP/TP+TN)
+- the lower 95% CI
+- the upper 95% CI
+- the ref_sites
+- ncompare, which is the length of ref_sites, which is = number of sites being compared. 
+
+We use the epi.test package as before.
+
+```{r}
+get_sensitivity_interval_notime <- function(df,  ref_sites){
+  df=  df[df[["SiteID"]] %in% ref_sites,]
+     
+    #get the numbers of positives and negatives    
+    df = doBy::summaryBy(Cauris_Result~Unique_ptid, data=df, FUN=sum, na.rm=TRUE)
+    df$Count = ifelse(df$Cauris_Result.sum > 0, 1, 0)
+    TP = sum(df$Count == 1)
+    TN = sum(df$Count == 0)
+    
+    dat <- as.table(matrix(c(TP, 0, TN, 0), nrow=2, byrow=TRUE))
+    out = epi.tests(dat, conf.level = 0.95)
+    out1 = out$rval$se
+    out1$ncompare = length(ref_sites)
+    rownames(out1) = toString(ref_sites)
+
+    return(out1)
+
+}  
+
+```
+
+
+#### Let's look at a table provided by collaborators as a test case
+
+First we test this package out on the data set in the paper Thurlow et al, 2013. Anatomic sites of patient colonization and environmental contamination with Klebsiella pneumoniae Carbapenemase-producing Enterobacteriaceae at Long Term Acute Care Hospitals. Infection Control & Hospital Epidemiology. 34(1). We use the data from table 2 as an example. This is the table from which data are drawn.
+
+![Table 2](/Users/proctordm/Desktop/candida_auris_rush/manuscript/data/KPC_table2.png){#id .class width=50% height=50%}
+
+
+**What does our table look like?** 
+Okay, this looks good. Our estimates and confidence intervals are the same as in the published paper. Let's move on to our data.
+
+```{r, echo=FALSE}
+#inguinal
+dat <- as.table(matrix(c(19, 0, 5, 0), nrow=2, byrow=TRUE))
+out1 = epi.tests(dat, conf.level = 0.95)
+ic = out1$rval$aprev
+rownames(ic) = "Inguinal"
+
+
+
+#axilla
+dat <- as.table(matrix(c(18, 0, 6, 0), nrow=2, byrow=TRUE))
+out1 = epi.tests(dat, conf.level = 0.95)
+ax = out1$rval$aprev
+rownames(ax) = "Axillary"
+
+
+#back
+dat <- as.table(matrix(c(6, 0, 18, 0), nrow=2, byrow=TRUE))
+out1 = epi.tests(dat, conf.level = 0.95)
+back = out1$rval$aprev
+rownames(back) = "Upper Back"
+
+#antecubital fossa
+dat <- as.table(matrix(c(6, 0, 18, 0), nrow=2, byrow=TRUE))
+out1 = epi.tests(dat, conf.level = 0.95)
+af = out1$rval$aprev
+rownames(af) = "Antecubital fossa"
+
+#rectal
+dat <- as.table(matrix(c(21, 0, 3, 0), nrow=2, byrow=TRUE))
+out1 = epi.tests(dat, conf.level = 0.95)
+rectal = out1$rval$aprev
+rownames(rectal) = "Rectal"
+
+#urine
+dat <- as.table(matrix(c(10, 0, 9, 0), nrow=2, byrow=TRUE))
+out1 = epi.tests(dat, conf.level = 0.95)
+urine = out1$rval$aprev
+rownames(urine) = "Urine"
+
+
+#oropharyngeal
+dat <- as.table(matrix(c(10, 0, 14, 0), nrow=2, byrow=TRUE))
+out1 = epi.tests(dat, conf.level = 0.95)
+oral = out1$rval$aprev
+rownames(oral) = "Oropharyngeal"
+
+#oropharyngeal
+dat <- as.table(matrix(c(10, 0, 14, 0), nrow=2, byrow=TRUE))
+out1 = epi.tests(dat, conf.level = 0.95)
+oral = out1$rval$aprev
+rownames(oral) = "Oropharyngeal"
+
+
+#rectal and inguinal
+dat <- as.table(matrix(c(24, 0, 0, 0), nrow=2, byrow=TRUE))
+out1 = epi.tests(dat, conf.level = 0.95)
+b1 = out1$rval$aprev
+rownames(b1) = "Rectal and Inguinal"
+
+
+#rectal and axilla
+dat <- as.table(matrix(c(23, 0, 1, 0), nrow=2, byrow=TRUE))
+out1 = epi.tests(dat, conf.level = 0.95)
+b2 = out1$rval$aprev
+rownames(b2) = "Retal and Axillary"
+
+#axilla and inguinal
+dat <- as.table(matrix(c(22, 0, 2, 0), nrow=2, byrow=TRUE))
+out1 = epi.tests(dat, conf.level = 0.95)
+b3 = out1$rval$aprev
+rownames(b3) = "Axillary and Inguinal"
+
+
+df = rbind(ic, ax, back, af, rectal, urine, oral, b1, b2, b3) 
+table2 = apply(df, 2, FUN=function(x) round(x, 2))
+
+
+
+kable(table2, caption = "Replicate Table 2") %>%
+  kable_styling("basic", full_width = F, bootstrap_options ="condensed") %>%
+  pack_rows("Skin sites", 1, 4) %>%
+  pack_rows("Nonskin Sites", 5, 6) %>%
+  pack_rows("Combined sites", 7, 10) %>%
+  footnote(general = "CI = Confidence Interval")
+
+```
+
+
+#### 2.Now let's make the equivalent table for the Candida auris paper.
+
+First read in the data
+```{r}
+site_codes = read.csv("~/Desktop/candida_auris_rush/sitecode_to_factored_sites.csv")
+data = read.csv("~/Desktop/candida_auris_rush/manuscript/data/Cauris_Analytic_2020-5-20.csv") %>%
+  dplyr::select(., c("Unique_ptid", "Survey_Period", "Cauris_Result", "site")) %>%
+  plyr::join(., site_codes)
+mpn = read.csv("~/Desktop/candida_auris_rush/manuscript/data/Cauris_Analytic_2020-5-20.csv") %>%
+  dplyr::select(., c("Unique_ptid", "Survey_Period", "Cauris_Result", "site", "CDC_MPN", "CFUTransform_Cauris")) %>%
+  plyr::join(., site_codes)
+```
+
+how many subjects were included in each survey?
+
+- survey 1: 56
+- survey 2: 45
+- survey 3: 43
+
+```{r}
+#how many subjects are in the first survey
+total=subset(data, Survey_Period==1) 
+totalN = length(unique(total$Unique_ptid))
+totalN
+
+#how many subjects are in the seccond survey
+total=subset(data, Survey_Period==2) 
+totalN = length(unique(total$Unique_ptid))
+totalN
+
+#how many subjects are in the third survey
+total=subset(data, Survey_Period==3) 
+totalN = length(unique(total$Unique_ptid))
+totalN
+```
+
+
+#### Define the working datset - newdata1
+
+- this includes 57 subjects
+- 56 were surveyed on survey 1
+- 1 (subject 29) was surveyed on survey 2
+```{r}
+#############define the dataset
+# for the dataset we have 57 subjects
+#56 were sampled on survey 1
+#1 was sampled on survey 2 (subject 29)
+########################
+############# Let's subset on the first time point so that we don't have 2-3 entries per patient
+newdata1 = subset(data, Survey_Period==1)
+
+#note that subject 29 was not sampled on day 1, just on day 2, so let's grab that individual, subsetting on time point 2 only
+subject29 = subset(data, Unique_ptid=="29" & Survey_Period=="2")
+newdata1 = data.frame(rbind(newdata1, subject29))
+
+#verify we have 57 subjects
+length(unique(newdata1$Unique_ptid))
+```
+
+
+
+#### One-way: Site-wise computation of proportion of colonized patients based on each site
+
+Let's run the function for the various comparisons of interest
+```{r, echo=FALSE}
+#get the single site sensitivity estimates
+an  = get_sensitivity_interval_notime(df=newdata1, ref_sites = c("An"))
+ax  = get_sensitivity_interval_notime(df=newdata1, ref_sites = c("Ax"))
+fg  = get_sensitivity_interval_notime(df=newdata1, ref_sites = c("Fg"))
+tw  = get_sensitivity_interval_notime(df=newdata1, ref_sites = c("Tw"))
+ic  = get_sensitivity_interval_notime(df=newdata1, ref_sites = c("Ic"))
+bu  = get_sensitivity_interval_notime(df=newdata1, ref_sites = c("Bu/To"))
+tc = get_sensitivity_interval_notime(df=newdata1, ref_sites = c("Tc"))
+ne = get_sensitivity_interval_notime(df=newdata1, ref_sites = c("Ne"))
+ea = get_sensitivity_interval_notime(df=newdata1, ref_sites = c("Ea"))
+n = get_sensitivity_interval_notime(df=newdata1, ref_sites = c("N"))
+
+#how many subjects per site
+an.n = length(unique(subset(newdata1, SiteID=="An")$Unique_ptid)) #51
+ax.n = length(unique(subset(newdata1, SiteID=="Ax")$Unique_ptid)) #56
+fg.n = length(unique(subset(newdata1, SiteID=="Fg")$Unique_ptid)) #57
+tw.n = length(unique(subset(newdata1, SiteID=="Tw")$Unique_ptid)) #56
+ic.n = length(unique(subset(newdata1, SiteID=="Ic")$Unique_ptid)) #56
+bu.n = length(unique(subset(newdata1, SiteID=="Bu/To")$Unique_ptid)) #56
+tc.n = length(unique(subset(newdata1, SiteID=="Tc")$Unique_ptid)) #41
+ne.n = length(unique(subset(newdata1, SiteID=="Ne")$Unique_ptid)) #57
+ea.n = length(unique(subset(newdata1, SiteID=="Ea")$Unique_ptid)) #56
+n.n = length(unique(subset(newdata1, SiteID=="N")$Unique_ptid))  #56
+
+
+n1 = length(unique(subset(newdata1, SiteID=="An")$Unique_ptid)) #51
+n2 = length(unique(subset(newdata1, SiteID=="Ax")$Unique_ptid)) #56
+n3 = length(unique(subset(newdata1, SiteID=="Fg")$Unique_ptid)) #57
+n4 = length(unique(subset(newdata1, SiteID=="Tw")$Unique_ptid)) #56
+n5 = length(unique(subset(newdata1, SiteID=="Ic")$Unique_ptid)) #56
+n6 = length(unique(subset(newdata1, SiteID=="Bu/To")$Unique_ptid)) #56
+n7 = length(unique(subset(newdata1, SiteID=="Tc")$Unique_ptid)) #41
+n8 = length(unique(subset(newdata1, SiteID=="Ne")$Unique_ptid)) #57
+n9 = length(unique(subset(newdata1, SiteID=="Ea")$Unique_ptid)) #56
+n10 = length(unique(subset(newdata1, SiteID=="N")$Unique_ptid))  #56
+ n1+n2+n3+n4+n5+n6+n7+n8+n9+n10
+#make summary tables
+CI.single = rbind(an, ax, fg, tw, ic, bu, tc, ne, ea, n)
+colnames(CI.single) = c("Prevalence", "95% CI, Lower", "95% CI, Upper", "N.Sites")
+CI.single = CI.single %>%
+  arrange(., desc(`Prevalence`))
+
+kable(CI.single, caption = "Sensitivity Analysis") %>%
+  kable_styling("basic", full_width = F, bootstrap_options ="condensed")
+
+```
+
+
+
+#### all two way
+
+- we want to pick the combination of sites (1-way, 2-way, 3-way, etc.) that adds a marginal benefit to the prior set of samples to a master table
+- we sort the 2-way comparisons to identify the 2-way site comparisons that maximize our estimate of the proportion of positive patients
+
+
+```{r}
+set.seed(91)
+alltwosites = combn(unique(newdata1$SiteID)[1:10], 2, simplify = TRUE)
+
+
+ holder <- vector("list", ncol(alltwosites))
+  for(i in 1:ncol(alltwosites)) {
+        twoway1  = get_sensitivity_interval_notime(df=newdata1, 
+                                                   ref_sites = alltwosites[,i])
+      holder[[i]] =  twoway1
+}
+
+CI.twoway = do.call("rbind", holder)
+colnames(CI.twoway) = c("Prevalence", "95% CI, Lower", "95% CI, Upper", "N.Sites")
+CI.twoway = CI.twoway %>%
+  arrange(., desc(`Prevalence`))
+
+kable(CI.twoway, caption = "Sensitivity Analysis") %>%
+  kable_styling("basic", full_width = F, bootstrap_options ="condensed")
+
+```
+
+
+
+
+#### Three way 
+
+
+- we want to pick the combination of sites (1-way, 2-way, 3-way, etc.) that adds a marginal benefit to the prior set of samples to a master table
+- we sort the 3-way comparisons to identify the 3-way site comparisons that maximize our estimate of the proportion of positive patients
+
+
+```{r}
+all3 = combn(unique(newdata1$SiteID)[1:10], 3, simplify = TRUE)
+
+ holder <- vector("list", ncol(all3))
+  for(i in 1:ncol(all3)) {
+        df  = get_sensitivity_interval_notime(df=newdata1, ref_sites = all3[,i])
+      holder[[i]] =  df
+}
+
+CI.threeway = do.call("rbind", holder)
+colnames(CI.threeway) = c("Prevalence", "95% CI, Lower", "95% CI, Upper", "N.Sites")
+CI.threeway = CI.threeway %>%
+  arrange(., desc(`Prevalence`))
+
+kable(CI.threeway, caption = "Sensitivity Analysis") %>%
+  kable_styling("basic", full_width = F, bootstrap_options ="condensed") 
+```
+
+
+
+#### Four way 
+
+
+- we want to pick the combination of sites (1-way, 2-way, 3-way, etc.) that adds a marginal benefit to the prior set of samples to a master table
+- we sort the 4-way comparisons to identify the 4-way site comparisons that maximize our estimate of the proportion of positive patients
+
+```{r}
+all4 = combn(unique(newdata1$SiteID)[1:10], 4, simplify = TRUE)
+
+ holder <- vector("list", ncol(all4))
+  for(i in 1:ncol(all4)) {
+        df  = get_sensitivity_interval_notime(df=newdata1, ref_sites = all4[,i])
+      holder[[i]] =  df
+}
+
+CI.fourway = do.call("rbind", holder)
+colnames(CI.fourway) = c("Prevalence", "95% CI, Lower", "95% CI, Upper", "N.Sites")
+CI.fourway = CI.fourway %>%
+  arrange(., desc(`Prevalence`))
+
+kable(CI.fourway, caption = "Sensitivity Analysis") %>%
+  kable_styling("basic", full_width = F, bootstrap_options ="condensed") 
+```
+
+
+#### Five way 
+
+
+- we want to pick the combination of sites (1-way, 2-way, 3-way, etc.) that adds a marginal benefit to the prior set of samples to a master table
+- we sort the 5-way comparisons to identify the 5-way site comparisons that maximize our estimate of the proportion of positive patients
+
+
+```{r}
+all5 = combn(unique(newdata1$SiteID)[1:10], 5, simplify = TRUE)
+
+ holder <- vector("list", ncol(all5))
+  for(i in 1:ncol(all5)) {
+        df  = get_sensitivity_interval_notime(df=newdata1, ref_sites = all5[,i])
+      holder[[i]] =  df
+}
+
+CI.fiveway = do.call("rbind", holder)
+colnames(CI.fiveway) = c("Prevalence", "95% CI, Lower", "95% CI, Upper", "N.Sites")
+CI.fiveway = CI.fiveway %>%
+  arrange(., desc(`Prevalence`))
+
+kable(CI.fiveway, caption = "Sensitivity Analysis") %>%
+  kable_styling("basic", full_width = F, bootstrap_options ="condensed")
+```
+
+#### Six way 
+
+
+- we want to pick the combination of sites (1-way, 2-way, 3-way, etc.) that adds a marginal benefit to the prior set of samples to a master table
+- we sort the 6-way comparisons to identify the 6-way site comparisons that maximize our estimate of the proportion of positive patients
+- 6 sites were required to achieve 100% sensitivity, identifying all patients colonized at any body site
+
+
+```{r}
+all6 = combn(unique(newdata1$SiteID)[1:10], 6, simplify = TRUE)
+
+ holder <- vector("list", ncol(all6))
+  for(i in 1:ncol(all6)) {
+        df  = get_sensitivity_interval_notime(df=newdata1, ref_sites = all6[,i])
+      holder[[i]] =  df
+}
+
+CI.sixway = do.call("rbind", holder)
+colnames(CI.sixway) = c("Prevalence", "95% CI, Lower", "95% CI, Upper", "N.Sites")
+CI.sixway = CI.sixway %>%
+  arrange(., desc(`Prevalence`))
+
+kable(CI.sixway, caption = "Sensitivity Analysis") %>%
+  kable_styling("basic", full_width = F, bootstrap_options ="condensed")
+```
+
+#### Seven way 
+
+- we want to pick the combination of sites (1-way, 2-way, 3-way, etc.) that adds a marginal benefit to the prior set of samples to a master table
+- we sort the 6-way comparisons to identify the 6-way site comparisons that maximize our estimate of the proportion of positive patients
+- 6 sites were required to achieve 100% sensitivity, identifying all patients colonized at any body site
+- 7-way is shown for completeness
+
+```{r}
+all7 = combn(unique(newdata1$SiteID)[1:10], 7, simplify = TRUE)
+
+ holder <- vector("list", ncol(all7))
+  for(i in 1:ncol(all7)) {
+        df  = get_sensitivity_interval_notime(df=newdata1, ref_sites = all7[,i])
+      holder[[i]] =  df
+}
+
+CI.sevenway = do.call("rbind", holder)
+colnames(CI.sevenway) = c("Prevalence", "95% CI, Lower", "95% CI, Upper", "N.Sites")
+CI.sevenway = CI.sevenway %>%
+  arrange(., desc(`Prevalence`))
+
+kable(CI.sevenway, caption = "Sensitivity Analysis") %>%
+  kable_styling("basic", full_width = F, bootstrap_options ="condensed")
+```
+
+#### Eight way 
+
+- we want to pick the combination of sites (1-way, 2-way, 3-way, etc.) that adds a marginal benefit to the prior set of samples to a master table
+- we sort the 6-way comparisons to identify the 6-way site comparisons that maximize our estimate of the proportion of positive patients
+- 6 sites were required to achieve 100% sensitivity, identifying all patients colonized at any body site
+- 8-way is shown for completeness
+
+
+```{r}
+all8 = combn(unique(newdata1$SiteID)[1:10], 8, simplify = TRUE)
+
+ holder <- vector("list", ncol(all8))
+  for(i in 1:ncol(all8)) {
+        df  = get_sensitivity_interval_notime(df=newdata1, ref_sites = all8[,i])
+      holder[[i]] =  df
+}
+
+CI.eightway = do.call("rbind", holder)
+colnames(CI.eightway) = c("Prevalence", "95% CI, Lower", "95% CI, Upper", "N.Sites")
+CI.eightway = CI.eightway %>%
+  arrange(., desc(`Prevalence`))
+
+kable(CI.eightway, caption = "Sensitivity Analysis") %>%
+  kable_styling("basic", full_width = F, bootstrap_options ="condensed") 
+```
+
+#### Nine way 
+
+- we want to pick the combination of sites (1-way, 2-way, 3-way, etc.) that adds a marginal benefit to the prior set of samples to a master table
+- we sort the 6-way comparisons to identify the 6-way site comparisons that maximize our estimate of the proportion of positive patients
+- 6 sites were required to achieve 100% sensitivity, identifying all patients colonized at any body site
+- 9-way is shown for completeness
+
+
+
+```{r}
+all9 = combn(unique(newdata1$SiteID)[1:10], 9, simplify = TRUE)
+
+ holder <- vector("list", ncol(all9))
+  for(i in 1:ncol(all9)) {
+        df  = get_sensitivity_interval_notime(df=newdata1, ref_sites = all9[,i])
+      holder[[i]] =  df
+}
+
+CI.nineway = do.call("rbind", holder)
+colnames(CI.nineway) = c("Prevalence", "95% CI, Lower", "95% CI, Upper", "N.Sites")
+CI.nineway = CI.nineway %>%
+  arrange(., desc(`Prevalence`))
+
+kable(CI.nineway, caption = "Sensitivity Analysis") %>%
+  kable_styling("basic", full_width = F, bootstrap_options ="condensed") 
+```
+
+#### all 10
+
+```{r}
+all10 = combn(unique(newdata1$SiteID)[1:10], 10, simplify = TRUE)
+
+ holder <- vector("list", ncol(all10))
+  for(i in 1:ncol(all10)) {
+        df  = get_sensitivity_interval_notime(df=newdata1, ref_sites = all10[,i])
+      holder[[i]] =  df
+}
+
+CI.tenway = do.call("rbind", holder)
+
+colnames(CI.tenway) = c("Prevalence", "95% CI, Lower", "95% CI, Upper", "N.Sites")
+CI.tenway = CI.tenway %>%
+  arrange(., desc(`Prevalence`))
+
+kable(CI.tenway, caption = "Sensitivity Analysis") %>%
+  kable_styling("basic", full_width = F, bootstrap_options ="condensed")
+```
+
+#### Let's get ax, ic, n since this is an often used surveillance combination
+
+```{r}
+#get the single site sensitivity estimates
+survey.sites1  = get_sensitivity_interval_notime(df=newdata1, ref_sites = c("Ax", "Ic", "N"))
+colnames(survey.sites1) = c("Prevalence", "95% CI, Lower", "95% CI, Upper", "N.Sites")
+
+survey.sites2  = get_sensitivity_interval_notime(df=newdata1, ref_sites = c("Ax", "Ic"))
+colnames(survey.sites2) = c("Prevalence", "95% CI, Lower", "95% CI, Upper", "N.Sites")
+```
+
+#### Make a table with the best hit for all sitewise permutations
+```{r}
+CI.combo = rbind(
+  survey.sites1,
+  survey.sites2,
+  CI.single[1,],
+  CI.twoway[1,],
+  CI.threeway[1,],
+  CI.fourway[1,],
+  CI.fiveway[1,],
+  CI.sixway[1,],
+  CI.sevenway[1,],
+  CI.eightway[1,],
+  CI.nineway[1,],
+  CI.tenway[1,])
+
+
+kable(CI.combo, caption = "Sensitivity Analysis") %>%
+  kable_styling("basic", full_width = F, bootstrap_options ="condensed") %>%
+  footnote(general = "CI = Confidence Interval",
+           alphabet = c("Footnote A; Prevalence is defined as the percentage of colonized subjects identified by the body site"))
+```
+
+
+
+
+### Figure 1A : Estimated prevalence is plotted per site. 
+
+Figure 1A: Surveillance of multiple skin, nares, perianal, oral body sites for prevalence and bioburden of C. auris colonization. 
+a, Frequency of colonization by C.auris at 10 body sites, color-coded by habitat, for 57 subjects at the time of first surveillance. The point estimate reflects the proportion of subjects colonized at each body site and error bars encompass the 95% confidence interval. 
+
+```{r, fig.width=6, fig.height=3}
+CI.single$site = as.factor(rownames(CI.single))
+colnames(CI.single) = c("Prevalence", "95% CI, Lower", "95% CI, Upper", "N.Sites", "SiteID")
+CI.single = plyr::join(CI.single, site_codes)
+CI.single$Site.Extended = as.factor(as.character(CI.single$Site.Extended))
+ordering = forcats::fct_inorder(levels(CI.single$Site.Extended))
+CI.single$Habitat = str_replace_all(CI.single$Habitat, "Stool", "GI Tract")
+CI.single$Habitat = str_replace_all(CI.single$Habitat, "Oral", "GI Tract")
+Figure1A = ggplot(CI.single, aes(y =  `Prevalence`, 
+                                       x = forcats::fct_inorder(Site.Extended))) +
+        geom_point(size=3) +
+        theme_classic() +
+        geom_errorbar(aes(ymin=`95% CI, Lower`, 
+                          ymax=`95% CI, Upper`), width=.2,
+                 position=position_dodge(.9))  + xlab("") + coord_flip() + 
+        ylim(0, 1) + ylab("Proportion Colonized")+ 
+  theme(text = element_text(size = 14 )) 
+
+Figure1A
+
+```
+
+
+#### Figure 1B: Sensitivity analysis identifying sites that capture observed prevalence of C. auris colonization based on different pairings of sites
+
+- note that we do not have data for false positives and false negatives; therefore, we cannot formally compute sensitivity, which is defined as TP / (TP+FN). Due to the lack of FP/FN data our prevalence and sensitivity estimates are equal. Instead, sensitivity is defined by dividing the "estimated site-wise prevalence" by the number of colonized subjects using all sites (0.8070175)
+
+- A minimum of 6 sites was required to achieve 100% sensitivity, capturing all colonized individuals. 
+
+
+Figure 1: Surveillance of multiple skin, nares, perianal, oral body sites for prevalence and bioburden of C. auris colonization. Sensitivity analysis to calculate the proportion of colonized individuals captured by performing surveillance on different pairings of sites. Sensitivity is defined as the Proportion Colonized at each site divided by the total number of individuals identified as colonized at any body site. From left to right, the two vertical lines correspond to the sensitivity of Axilla/Inguinal Crease and Axilla/Inguinal Crease/ Nares. A minimum of 6 sites was required to achieve 100% sensitivity, capturing all colonized individuals. 
+```{r, fig.width=5, fig.height=3}
+true.prevalence.t1 =  0.8070175
+
+sensitivity = data.frame(CI.combo[,1:3]/true.prevalence.t1, CI.combo[,4])
+colnames(sensitivity) = c("Sensitivity", "95% CI, Lower", "95% CI, Upper", "N.Sites")
+sensitivity$Site = rownames(sensitivity)
+sensitivity = subset(sensitivity, N.Sites <7)
+
+sensitivity = sensitivity %>%
+  arrange(., desc(Sensitivity))
+sensitivity$name <- factor(sensitivity$Site, levels = sensitivity$Site)
+
+
+#make plot
+#let's annotate by adding lines at "Ax, Ic" and with "Ax, Ic, N"  rather than including them as data points
+myannotations = subset(sensitivity, name %in% c("Ax, Ic","Ax, Ic, N"))
+sensitivity1 = subset(sensitivity, !(name %in% c("Ax, Ic","Ax, Ic, N")))
+
+ax.ic = data.frame(subset(sensitivity, name == "Ax, Ic"))$Sensitivity
+
+ax.ic.n = data.frame(subset(sensitivity, name == "Ax, Ic, N"))$Sensitivity
+ax.ic
+ax.ic.n
+#relabel the site codes
+sensitivity1$name = plyr::revalue(sensitivity1$name,
+                        c("N, Ic, Fg, Tw" = "N, Fg, Tw,  Ic",
+                          "N, Ic, Fg, Tw, An" = "N, Fg, Tw,  Ic, An",
+                          "N, Ax, Ic, Fg, Tw, An" = "N, Fg, Tw,  Ic, An, Ax"))
+  
+
+
+
+Figure1C = ggplot(sensitivity1, aes(y =  `Sensitivity`, 
+                                       x = `name`)) +
+        geom_point(size=4) +
+        theme_classic()  + xlab("") + coord_flip() + 
+        labs(col="Number of sites")  +ylab("Sensitivity") +
+        geom_hline(yintercept = ax.ic , linetype = "dotted") + 
+        geom_text(aes(6, ax.ic,label = "(Ax, Ic)", vjust = -1)) +
+        geom_hline(yintercept = ax.ic.n, linetype = "dotted" ) +
+        geom_text(aes(6, ax.ic.n,label = "(Ax, Ic, N)", vjust = -1))+
+        ylim(0.5, 1.1)+ 
+  theme(text = element_text(size = 14 )) 
+Figure1C
+```
+
+
+
+
+#### Supplementary Figure 2: Ridgeline plot for samples across sites during the first survey. 
+
+Supplementary Figure 2: Ridgeline plot for sample colony counts across sites during the first survey. The cumulative distribution for each ridgeline sums to 1, with peaks corresponding to peak bioburden (log colony forming units), for each site. Sites with low level colonization include Sebaceous sites (External Auditory Canal, Neck) while sites having the highest bioburden include Nares and Inguinal crease. 
+
+```{r, fig.width=6, fig.height=3}
+mpn$CFU.Missing = is.na(mpn$CFUTransform_Cauris)
+mpn$Log.cfu = log(mpn$CFUTransform_Cauris)
+mpn$sqrt.cfu = sqrt(mpn$CFUTransform_Cauris)
+cfu = subset(mpn, CFU.Missing==FALSE) %>%
+  subset(., CFUTransform_Cauris > 1)  %>%
+  subset(., Survey_Period == 1) %>%
+  dplyr::select(., c("Log.cfu", "SiteID")) %>%
+  plyr::join(., site_codes)
+
+cfu$Habitat = str_replace_all(cfu$Habitat, "Oral", "GI Tract")
+cfu$Habitat = str_replace_all(cfu$Habitat, "Stool", "GI Tract")
+
+foo = arrange(Figure1A$data, -Prevalence)
+ordering = foo$Site.Extended
+
+cfu$Site.Extended2 <- factor(cfu$Site.Extended, levels = ordering)
+SupplementaryFigure3= ggplot(cfu, aes(x = Log.cfu, y = Site.Extended2)) + 
+  geom_density_ridges(scale = 5, alpha=0.8) + theme_classic() + xlim(0, 12) +
+  ylab("") + xlab("Colony Forming Units (CFUs, Log Scale)") + theme(text = element_text(size = 14))
+
+SupplementaryFigure3
+```
+
+
+
+
+#### Figure 1C: MPN counts differ by body site and are highest at the nares
+
+Figure 1: Surveillance of multiple skin, nares, perianal, oral body sites for prevalence and bioburden of C. auris colonization. 
+
+Number of cultured C. auris colonies, determined by Most Probable Number (MPN), plotted for Inguinal Crease (Ic), Nares (N), and  Axilla (Ax). Group wise medians are demarcated with blue lines. Statistical significance of differences was assessed with the Kruskal-Wallis test.
+
+```{r, fig.height=3, fig.width=3}
+mpn =  dplyr::select(mpn, c("Unique_ptid", "Survey_Period", "Cauris_Result", "site", 
+                     "CDC_MPN")) %>%
+  plyr::join(., site_codes)  %>%
+  subset(., SiteID %in% c("Ax", "N", "Ic")) %>%
+  subset(., Survey_Period==1)
+
+mpn = subset(mpn, CDC_MPN > 0)
+mpn$CDC_MPN_Mod = mpn$CDC_MPN
+mpn$CDC_MPN_Mod <- ifelse(is.na(mpn$CDC_MPN_Mod), mpn$Cauris_Result, mpn$CDC_MPN_Mod)
+
+dfa = subset(mpn, SiteID %in% c("N", "Ic"))
+dfa$subset = "a"
+dfa$logMPN = log(1+dfa$CDC_MPN_Mod)
+dfb = subset(mpn, SiteID %in% c("N", "Ax"))
+dfb$subset = "b"
+dfb$logMPN = log(1+dfb$CDC_MPN_Mod)
+newdf = data.frame(rbind(dfa, dfb))
+ordering = c("Anterior Nares (N)", "Axilla (Ax)", "Inguinal (Ic)")
+
+newdf$Site.Extended <- factor(newdf$Site.Extended, levels = ordering)
+mpn$Site.Extended <- factor(mpn$Site.Extended, levels = ordering)
+
+table(mpn$Site.Extended)
+#make the figure
+Figure1B = 
+  ggplot(mpn, aes(x = factor(Site.Extended, 
+                   level = c("Anterior Nares (N)", "Axilla (Ax)", "Inguinal (Ic)")), 
+                 y = CDC_MPN))  +
+    stat_summary(fun = median, fun.min = median, fun.max = median,
+                 geom = "crossbar", width = 0.5) +
+  geom_jitter(width=0.05) + 
+  theme_classic()  + scale_y_log10(label=comma) + 
+  xlab("") + ylab("Most Probable Number (MPN)")   +
+    theme(text = element_text(size=14),
+        axis.text.x = element_text(angle=0, hjust=1)) 
+Figure1B
+```
+
+
+#### Figure 1: Surveillance of multiple skin, nares, anal, oral body sites for prevalence and patient-level bioburden of C. auris colonization. 
+
+Figure 1: Surveillance of multiple skin, nares, perianal, oral body sites for prevalence and bioburden of C. auris colonization. a) Frequency of colonization by C.auris at 10 body sites, color-coded by habitat. Point estimate reflects the proportion of subjects colonized at each body site. Error bars encompass the 95% confidence interval. b) Number of cultured C. auris colonies, determined by Most Probable Number (MPN), plotted for Inguinal Crease (Ic), Nares (N), and  Axilla (Ax). Group wise medians are demarcated with blue lines. Statistical significance of differences was assessed with the Kruskal-Wallis test. c) Sensitivity analysis to calculate the proportion of colonized individuals captured by performing surveillance on different pairings of sites. Sensitivity is defined as the Proportion Colonized at each site divided by the total number of individuals identified as colonized at any body site. From left to right, the two vertical lines correspond to the sensitivity of Axilla/Inguinal Crease and Axilla/Inguinal Crease/ Nares. A minimum of 6 sites was required to achieve 100% sensitivity, capturing all colonized individuals. 
+
+
+```{r, fig.width=4, fig.height=8}
+cowplot::plot_grid(
+  Figure1A,
+  Figure1C,
+  Figure1B,
+  labels=c("a", "b", "c"), ncol=1,
+  rel_heights = c(1,1, 1),
+  rel_widths = c(1,1, 1)
+)
+
+ggsave(Figure1A, file="~/Desktop/proctor_manuscript/Figure1/Figure1a.eps", device="eps")
+ggsave(Figure1B, file="~/Desktop/proctor_manuscript/Figure1/Figure1b.eps", device="eps")
+ggsave(Figure1C, file="~/Desktop/proctor_manuscript/Figure1/Figure1c.eps", device="eps")
+
+#save to pdf
+ggsave(cowplot::plot_grid(
+  Figure1A,
+  Figure1B,
+  NULL,
+  Figure1C,
+  labels=c("a", "b", "", "c"), ncol=2,
+  rel_heights = c(1,1, 1,1),
+  rel_widths = c(1.1,1, 1.1, 1)
+), file="~/Desktop/proctor_manuscript/Figure1/Figure1.pdf", width = 12, height = 9, device="pdf")
+
+#save to eps
+ggsave(cowplot::plot_grid(
+  Figure1A,
+  Figure1B,
+  NULL,
+  Figure1C,
+  labels=c("a", "b", "", "c"), ncol=2,
+  rel_heights = c(1,1, 1,1),
+  rel_widths = c(1.1,1, 1.1, 1)
+), file="~/Desktop/proctor_manuscript/Figure1/Figure1.eps", width = 12, height = 9, device="eps")
+
+```
+
+#### Supplementary Figure 1: Patterns of body site occupancy visualized with UpSetR. 
+
+Supplementary Figure 1: Patterns of body site colonization visualized with UpSetR. Colors map to degree, a measure of the number of co-colonized sizes. A total of 36 distinct co-colonization patterns were observed, each arranged from the left to the right as a function of decreasing degree. The intersection size is the number of subjects whose body-site colonization matches the points connecting sites for each of the 36 unique co-colonization patterns. For example, the nares and fingertips are more frequently mono-colonized than any of the other sites while the Bu/To, Neck, Tc, and Ea are never mono-colonized. Most patients have a distinct pattern of co-colonization with the most frequent pattern being the Fg, Ax and the N, An, and Ea. The set size corresponds to the frequency of colonization for each site for the first time point. Colors map to degree, a measure of the number of co-colonized sizes per set. 
+
+
+```{r, fig.height=4}
+############# Let's subset on the first time point so that we don't have 2-3 entries per patient
+newdata1 = subset(data, Survey_Period==1)
+
+#note that subject 29 was not sampled on day 1, just on day 2, so let's grab that individual, subsetting on time point 2 only
+subject29 = subset(data, Unique_ptid=="29" & Survey_Period=="2")
+newdata1 = data.frame(rbind(newdata1, subject29)) 
+newdata2 = newdata1  %>%
+    subset(., SiteID != "Ax, Ic") 
+newdata3 = dplyr::select(newdata2, c("Unique_ptid", "SiteID", "Cauris_Result")) 
+
+
+#verify we have 57 subjects
+#length(unique(newdata3$Unique_ptid))
+rownames(newdata3) = NULL
+
+
+cast.df<-dcast(newdata3, Unique_ptid~SiteID, value.var="Cauris_Result")
+cast.df[is.na(cast.df)] = 0
+
+#make the heatmap
+m = make_comb_mat(cast.df)
+
+UpSet(m, top_annotation = HeatmapAnnotation(
+    degree = as.character(comb_degree(m)),
+    "Intersection\nsize" = anno_barplot(comb_size(m), 
+        border = FALSE, 
+        gp = gpar(fill = "black"), 
+        height = unit(2, "cm")
+    ), 
+    annotation_name_side = "left", 
+    annotation_name_rot = 0))
+
+```
+
+### How many people are person colonized at >=3 sites?
+
+- wee can see that 46 people were colonized at one or more site
+```{r}
+foo = cast.df
+rownames(foo) = foo$Unique_ptid
+foo$Unique_ptid = NULL
+foo$N.positive = rowSums(foo)
+
+tab = data.frame(table(foo$N.positive))
+
+#number of people colonized at 1 sites
+14/46
+
+
+#number of people colonized at >2 sites
+sum(tab$Freq[3:9])/46
+#number of people colonized at >3 sites
+sum(tab$Freq[4:9])/46
+
+```
+
+
+
+
+#### Supplementary Figure 3 - paired MPN analysis
+
+Supplementary Figure 3: Paired Most Probable Number (MPN). MPN estimates are shown for the inguinal crease, anterior nares, and axilla. Data represented are from the first point prevalence survey. Each line represents an individual. Individual trajectories reveal a large number of individuals with high counts at the nares and either absent or low level colonization at the axilla or inguinal crease
+```{r, fig.width=5, fig.height=3}
+mpn = read.csv("~/Desktop/candida_auris_rush/manuscript/data/Cauris_Analytic_2020-5-20.csv") %>%
+  dplyr::select(., c("Unique_ptid", "Survey_Period", "Cauris_Result", "site", 
+                     "CDC_MPN")) %>%
+  plyr::join(., site_codes)  %>%
+  subset(., SiteID %in% c("Ax", "N", "Ic")) %>%
+  subset(., Survey_Period==1)
+
+
+mpn$CDC_MPN_Mod = mpn$CDC_MPN
+mpn$CDC_MPN_Mod <- ifelse(is.na(mpn$CDC_MPN_Mod), mpn$Cauris_Result, mpn$CDC_MPN_Mod)
+
+ordering = c("N", "Ax", "Ic")
+mpn$SiteID  <- factor(mpn$SiteID, levels = ordering)
+
+dfa = subset(mpn, SiteID %in% c("N", "Ic"))
+dfa$subset = "a"
+dfa$logMPN = log(1+dfa$CDC_MPN_Mod)
+dfb = subset(mpn, SiteID %in% c("N", "Ax"))
+dfb$subset = "b"
+dfb$logMPN = log(1+dfb$CDC_MPN_Mod)
+newdf = data.frame(rbind(dfa, dfb))
+ordering = c("Ax", "N", "Ic")
+newdf$SiteID <- factor(newdf$SiteID, levels = ordering)
+
+SupplementaryFigure4 = 
+  ggplot(newdf, aes(x = factor(Site.Extended, 
+                   level = c("Inguinal (Ic)" ,  "Anterior Nares (N)",   "Axilla (Ax)"  )), 
+                 y = CDC_MPN_Mod, group=Unique_ptid)) +
+  geom_point() + 
+  geom_line()  +
+  theme_classic()  + scale_y_log10(label=comma) + 
+  theme(
+  strip.background = element_blank(),
+  strip.text.x = element_blank() 
+)+ xlab("Site") + ylab("MPN (log10)") 
+SupplementaryFigure4
+```
+
+
+### What are the version numbers of all packages and ultilies used in this script?
+```{r}
+sessionInfo()
+```
