@@ -1,6 +1,6 @@
 # candida_auris
 
-**Title: Integrated genomic, epidemiologic investigation of Candida auris skin colonization in a skilled nursing facility **
+**Title: Integrated genomic, epidemiologic investigation of Candida auris skin colonization in a skilled nursing facility**
 
 Authors: Diana M Proctor1, Thelma Dangana2, D. Joseph Sexton3, Christine Fukuda2, Rachel D Yelin2, Mary
 Stanley2, Pamela B Bell2, Sangeetha Baskaran2, Clay Deming1, Qiong Chen1, Sean Conlan1, Morgan Park4, NISC Comparative Sequencing Program4, Rory M Welsh3, Snigdha Vallabhaneni3,5, Tom Chiller3, Kaitlin Forsberg3, Stephanie R. Black6, Massimo Pacilli6, Heidi H Kong7, Michael Y Lin2, Michael E Schoeny8, Anastasia P Litvintseva3, Julia A Segre1,9*, Mary K Hayden2,9*
