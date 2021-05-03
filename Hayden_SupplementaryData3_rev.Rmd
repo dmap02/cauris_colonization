@@ -1,0 +1,959 @@
+---
+title: 'Figure 3: Underlying skin microbiome (fungal and bacterial communities) integrated
+  with C. auris colonization status'
+author: "Diana Proctor"
+date: "06/30/2020"
+output:
+  html_document: default
+  pdf_document: default
+---
+last updated: `r format(Sys.Date(), format="%B %d %Y")`
+
+
+***
+
+**draft: submission to Nature Medicine October 2020**
+
+
+*Manuscript Title*: Integrated genomic, epidemiologic investigation of Candida auris skin colonization 
+
+*Authors*: Diana M Proctor1, Thelma Dangana2, D. Joseph Sexton3, Christine Fukuda2, Rachel D Yelin2, Mary Stanley2, Pamela B Bell2, Sangeetha Baskaran2, Clay Deming1, Qiong Chen1, Sean Conlan1, NISC Comparative Sequencing Program4, Rory M Welsh3, Snigdha Vallabhaneni3,5, Tom Chiller3, Kathleen Forsberg3, Stephanie R. Black6, Massimo Pacilli6, Heidi H Kong7, Michael Y Lin2, Michael E Schoeny8, Anastasia P Litvintseva3, Julia A Segre1+, Mary K Hayden2+
+
+
+*Affiliations*:
+
+- 1Microbial Genomics Section, Translational and Functional Genomics Branch, National Human Genome Research Institute, National Institutes of Health, Bethesda, MD 20892, USA
+
+- 2 Department of Internal Medicine, Division of Infectious Diseases, Rush University Medical Center, Chicago, IL 60612, USA.
+
+- 3Mycotic Diseases Branch, Centers for Disease Control and Prevention, Atlanta, GA 30333, USA.
+
+- 4NIH Intramural Sequencing Center, National Human Genome Research Institute, National Institutes of Health, Bethesda, MD 20892, USA.
+
+- 5Division of Healthcare Quality Promotion, NCEZID, CDC, USA
+
+- 6Communicable Disease Program, Chicago Department of Public Health, Chicago, IL, 60612, USA.
+
+- 7Dermatology Branch, National Institute of Arthritis and Musculoskeletal and Skin Diseases, National Institutes of Health, Bethesda, MD 20892, USA
+
+- 8College of Nursing, Rush University, Chicago, IL 60612, USA.
+
+- +Contributed equally
+
+***
+
+### Description of the dataset
+
+For this data set, we have samples for 51 subjects who were sampled for 16S rRNA and ITS1 sequencing. In addition, we have a clinical data set including the variables that were used to generate Table 1. The purpose of this script is to identify associations between bacteria and fungi with respect to Candida auris colonization outcomes (0, 1).
+
+In order to accomplish this, we read in the following data:
+
+1. its_match.rds
+2. bac_match.rds
+
+
+### Here, we render the following figures:
+
+1. Figure 2
+2. Supplementary Figure 5
+
+---
+
+```{r}
+#set global knitting options
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, error = FALSE)
+```
+
+
+```{r}
+packages <- c("knitr", 
+              "tidyverse",
+              "colorspace",
+              "viridis", 
+              "scales", 
+              "kableExtra", 
+              "ggplot2", 
+              "reshape2", 
+              "gridExtra", 
+              "phyloseq",
+              "ggordiplots",
+              "DESeq2",
+              "mixOmics",
+              "ggpubr",
+              "dabestr",
+              "compositions",
+              "ggsci",
+              "RColorBrewer",
+              "ggrepel",
+              "stringr",
+              "yarrr",
+              "mixOmics")
+
+# install packages from bioconductor
+BiocManager::install(setdiff(packages,installed.packages()), update=FALSE)
+
+#From Dan Sprockett
+# load packages
+n <- length(packages) - sum(sapply(packages,require,character.only=TRUE))
+
+# print if packages loaded properly
+if(n == 0){
+  print("All necessary R packages loaded properly")
+} else {
+  print(paste0(n, " R packages did not load properly"))
+}
+
+
+```
+
+set plotting options and define functions
+
+```{r}
+safe_colorblind_palette <- c("#88CCEE", "#CC6677", "#DDCC77", "#117733", "#332288", "#AA4499", 
+                             "#44AA99", "#999933", "#882255", "#661100", "#6699CC", "#888888")
+mypal = brewer.pal(9, "Set1")
+
+ISU_secondary_palette <- c("#3E4827", "#76881D", "#A2A569",
+                           "#003D4C", "#006BA6", "#7A99AC",
+                           "#7C2529", "#9A3324", "#BE531C",
+                           "#8B5B29", "#B9975B", "#EED484",
+                           "#6E6259", "#707372", "#ACA39A", "#C8102E")
+
+
+
+phyToDf <- function(phy, level) {
+      ra = transform_sample_counts(phy, function(x) x/sum(x))
+      #domain.phy <- tax_glom(ra, taxrank=level)
+      tax.count <- data.frame(data.frame(ra@tax_table@.Data, t(otu_table(ra))))
+      dfm = melt(tax.count, colnames(tax_table(ra))) 
+      colnames(dfm)[colnames(dfm) == 'variable'] <- 'Fungal.Matcher'
+      sample_data(ra)$Fungal.Matcher =
+        str_replace_all(sample_data(ra)$Fungal.Matcher, "([;])", ".")
+      df = plyr::join(dfm,data.frame(sample_data(ra)) )
+      return(df)
+}
+
+
+#define some functions
+add_NSubjects <- function(phy) {
+    map = as.data.frame(as.matrix(sample_data(phy))) %>%
+      dplyr::count(., PID, sort = FALSE, name = "NSamplesPerSubject")  %>%
+      plyr::join(., data.frame(sample_data(phy)), by = "PID") %>%
+      tibble::column_to_rownames(., "Fungal.Matcher")%>%
+      sample_data(.)
+}
+
+add_NSites <- function(phy) {
+      map = as.data.frame(as.matrix(sample_data(phy))) %>%
+      dplyr::group_by(., Unique_ptid) %>%
+      dplyr::count(., SiteID,  name = "NSamplesPerSubjectSite")
+      df = as.data.frame(map)
+      new_map = merge(df, sample_data(phy), by=c("Unique_ptid", "SiteID"))
+      rownames(new_map) = new_map$Fungal.Matcher
+      new_map = sample_data(new_map)
+      return(new_map)
+}
+```
+
+Read in in the data and clean it up
+
+rename the candida genera to candida
+rename the highest rank to the candida variant of the species name
+
+g__Candida s__jadinii = Candida utils
+Issatchenkia orientalis = Candida krusei
+
+one asv assigned to the genus candida which couldn't be assigned to the species level and was preesent in only 59 reads, dropped
+```{r}
+its_match = readRDS(file="~/Desktop/candida_auris_rush/its_match_CDI-out.rds") %>%
+                  subset_samples(., Survey_Period==1) %>%
+  subset_samples(., Unique_ptid !=32)
+sample_names(its_match) = str_replace_all(sample_names(its_match), "Bu/To", "BuTo")
+sample_data(its_match)$Fungal.Matcher = sample_names(its_match)
+
+tax = data.frame(its_match@tax_table@.Data) 
+taxa_names(its_match) = tax$Seq
+write.csv(tax, "~/Desktop/candida_auris_rush/its_match_CDI-out-tax_uncorrected.csv")
+
+tax = read.csv("~/Desktop/candida_auris_rush/its_match_CDI-out-tax_corrected.csv")
+rownames(tax) = tax$X
+tax = as.matrix(tax) %>%
+  tax_table(.)
+tax_table(its_match) = tax
+
+#update taxa names to highest rank
+tax = data.frame(its_match@tax_table@.Data)
+new.names = tax$Highest.Rank
+taxa_names(its_match) = new.names
+
+
+#drop taxa that aren't assigned to the genus level
+
+its_match2 = subset_taxa(its_match, !(ASV_Number %in% c(
+            "ASV_458",
+            "ASV_647",
+            "ASV_1314",
+            "ASV_1400",
+            "ASV_1724",
+            "ASV_1792",
+            "ASV_1860",
+            "ASV_1861",
+            "ASV_1897",
+            "ASV_2340",
+            "ASV_3824")))
+
+its_match2 =  subset_taxa(its_match2, Highest.Rank != "Less_than_10_per_ASV Less_than_10_per_ASV")
+#read in the bacterial data
+bac_match = readRDS(file="~/Desktop/candida_auris_rush/bac_match_CDI-out.rds") %>%
+  subset_samples(., Unique_ptid !=32) %>%
+  subset_samples(., Survey_Period=="1") %>%
+  prune_taxa(taxa_sums(.) > 0, .)
+
+sample_names(bac_match) = str_replace_all(sample_names(bac_match), "Bu/To", "BuTo")
+sample_data(bac_match)$Fungal.Matcher = sample_names(bac_match)
+
+filtergroup = genefilter::filterfun(genefilter::kOverA(k=76, A=10)) #k = number of samples; A = abundance
+bac_filt =filter_taxa(bac_match, filtergroup, prune=TRUE)  %>%
+        prune_taxa(taxa_sums(.) > 0, .) 
+
+
+its_filt = its_match2
+
+
+### get the clinical data
+clindf = data.frame(sample_data(its_filt),
+                    Unique_ptid=sample_data(its_filt)$Unique_ptid,
+                    Site=sample_data(its_filt)$site,
+                    Cauris_Result = sample_data(its_filt)$Cauris_Result,
+                    Survey_Period=sample_data(its_filt)$Survey_Period)
+ clindf = dplyr::select(clindf, c("Unique_ptid", "Survey_Period", "Site",  "Cauris_Result",
+                     "trach", "gtube", "urinary_cath", "mech_vent", "age", "braden_score",
+                     "pasthospitaladmit", "antifungal_rx", "abx_rx", "contact_iso",
+                     "sex", "braden_score"))
+
+clindf$Cauris_Result = as.factor(as.character(clindf$Cauris_Result))
+clindf$Cauris_Result = plyr::revalue(clindf$Cauris_Result, c(
+      "0"="Colonization Negative",
+      "1"="Colonization Positive"))
+clindf = subset(clindf, Survey_Period==1)
+#fix the clinical data
+Y1 = clindf$Cauris_Result
+clindf = subset(clindf,  Unique_ptid != 32)
+design = dplyr::select(clindf, c("Unique_ptid", "Site", "Survey_Period"))
+clinSave = clindf
+#clindf = subset(clindf, Unique_ptid != "32")
+clindf$Unique_ptid = NULL
+clindf$Site = NULL
+clindf$Survey_Period = NULL
+clindf$Cauris_Result = NULL
+
+#scale the variables in the clinical table
+clin_scales = scale(clindf)
+
+
+#vst the taxa tables for each dataset independently
+clrF = compositions::clr(data.frame(otu_table(its_filt)))
+clrB = compositions::clr(data.frame(otu_table(bac_filt)))
+
+#order the data frames so they are the same
+clrB = clrB[rownames(clin_scales),]  
+clrF = clrF[rownames(clin_scales),]  
+
+### specify a design matrix
+# in design we only need to mention the repeated measurements to split the one level variation
+foo = subset_samples(its_filt, Survey_Period==1)
+design1 = data.frame(sample_data(foo)) %>%
+  dplyr::select("Unique_ptid")
+
+design2 = data.frame(sample_data(foo)) %>%
+  dplyr::select("SiteID")
+
+### Within analysis
+clinW <- mixOmics::withinVariation(X=clin_scales, design=design1)
+clrBw <- mixOmics::withinVariation(X = clrB, design = design2)
+clrFw <- mixOmics::withinVariation(X = clrF, design = design2)
+
+### make table lists
+Xa <- list(fungi=clrFw, bacteria=clrBw)
+
+```
+
+
+
+
+### Figure 2A:  Fungal data 
+
+Panel A: Each panel encompasses samples for the specified body site with bars representing the relative abundance of taxa for each patient. The inner black curve represents the relative abundance of C. auris for each sample at that site. a) Relative abundance of top fungal genera at each body site surveyed for each individual. Genera included in the `Other` category include: Saccharomyces, Trichosporon, Trichophyton, Aspergillus.
+
+
+
+```{r, fig.width=12, fig.height=5}
+ordering =    c("Malassezia",
+                "Malasseziales",    
+                "Other",
+                "Candida",
+                "Candida utils",
+                "Candida glabrata",
+                "Candida duobushaemulonii",
+                "Candida orthopsilosis",
+                "Candida albicans",
+                "Candida parapsilosis", 
+                "Candida tropicalis",
+                "Candida auris")
+
+colours= c("Malassezia"="#77AADD",
+            "Malasseziales" = "#77AADD",
+             "Other"="#EE8866", 
+             "Candida"= "#1B7837",
+              "Candida utils"="#AA4499", #
+             "Candida glabrata"="#AAAA00", #  
+             "Candida duobushaemulonii"="#BBCC33", # 
+             "Candida orthopsilosis"="#44BB99", #    
+             "Candida albicans"="#99DDFF", #
+            "Candida parapsilosis"="#993404", #
+            "Candida tropicalis"="#EEDD88", #
+            "Candida auris"="#E7D4E8")
+
+label.vector = c( "Candida utils",
+             "Candida glabrata", 
+             "Candida duobushaemulonii",
+             "Candida orthopsilosis",  
+             "Candida albicans", 
+            "Candida parapsilosis", 
+            "Candida tropicalis", 
+            "Candida auris")
+
+
+
+```
+
+### Figure 2
+
+```{r}
+
+show_candida_plot_by_rank <- function(phy, Site){
+    map = data.frame(sample_data(phy)) %>%
+      dplyr::select(., c("Fungal.Matcher", "percentAuris", "Cauris_Result"))
+    rownames(map) = NULL
+    myranks = map %>%
+      arrange(., percentAuris) %>%
+      mutate(., Rank=order(percentAuris))%>%
+      dplyr::select(., c("Fungal.Matcher", "Rank"))
+    myranks$Fungal.Matcher = str_replace_all(myranks$Fungal.Matcher, ";", ".")
+    myranks$Fungal.Matcher = as.factor(as.character(myranks$Fungal.Matcher))
+    mydf = phyToDf(phy, "Genus")
+    df = plyr::join(mydf, myranks)
+      df$Genus = str_remove_all(df$Genus, "g__")
+      df$Genus = ifelse(!(df$Genus %in% c("Malassezia", "Candida", "Malasseziales")), "Other", df$Genus)
+      df$Genus = ifelse(df$Genus=="Malasseziales", "Malassezia", df$Genus)
+      df$Label = ifelse(df$Highest.Rank %in% label.vector, df$Highest.Rank, df$Genus)    
+      df$Label=factor(df$Label, levels = ordering) 
+      df = subset(df, Cauris_Result %in% c(0, 1))
+    p = ggplot(df) +
+            geom_col(aes(x=Rank, y=value, fill=Label), position="stack", width=1) + 
+            geom_line(aes(x=Rank, y = percentAuris, group = 1)) + theme_classic() +
+            ylab("") +  
+            ylim(0, 1) +
+            ggtitle(paste0(Site)) +
+        theme(plot.title = element_text(size = 12),
+        axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) +
+             scale_fill_manual(values = colours) 
+    return(p)
+    }
+
+#set up the percent auris variable 
+sample_data(its_match2)$percentAuris = sample_data(its_match2)$caurisReads/sample_sums(its_match2)
+map = data.frame(sample_data(its_match2))
+
+sample_data(bac_match) = sample_data(map)
+
+myphy =  subset_samples(its_match2, SiteID=="An") %>%
+      prune_samples(sample_sums(.) > 0, .) %>%
+      prune_taxa(taxa_sums(.) > 0, .) 
+p1 = show_candida_plot_by_rank(phy=myphy, Site="Peri-Anus")  + 
+             theme(legend.position = "none", 
+                  text = element_text(size=14),
+        axis.text.y = element_text(angle=0, hjust=1))  +
+  ylab("Relative Abundance") 
+
+
+myphy =  subset_samples(its_match2, SiteID=="Ax") %>%
+      prune_samples(sample_sums(.) > 0, .) %>%
+      prune_taxa(taxa_sums(.) > 0, .) 
+p2 = show_candida_plot_by_rank(phy=myphy, Site="Axilla") + 
+             theme(legend.position = "none",
+              axis.text.y = element_blank())
+
+myphy =  subset_samples(its_match2, SiteID=="Bu/To") %>%
+      prune_samples(sample_sums(.) > 0, .) %>%
+      prune_taxa(taxa_sums(.) > 0, .) 
+
+p3 = show_candida_plot_by_rank(phy=myphy, Site="Buccal Mucosa/Tongue") + 
+             theme(legend.position = "none",
+              axis.text.y = element_blank())
+
+
+
+myphy =  subset_samples(its_match2, SiteID=="N") %>%
+      prune_samples(sample_sums(.) > 0, .) %>%
+      prune_taxa(taxa_sums(.) > 0, .) 
+p4 = show_candida_plot_by_rank(phy=myphy, Site="Nares")  + 
+             theme(legend.position = "none",
+              axis.text.y = element_blank())
+
+myphy =  subset_samples(its_match2, SiteID=="Ea") %>%
+      prune_samples(sample_sums(.) > 0, .) %>%
+      prune_taxa(taxa_sums(.) > 0, .) 
+p5 = show_candida_plot_by_rank(phy=myphy, Site="Ear canal")  + 
+             theme(legend.position = "none",
+              axis.text.y = element_blank())
+
+
+
+myphy =  subset_samples(its_match2, SiteID=="Tc") %>%
+      prune_samples(sample_sums(.) > 0, .) %>%
+      prune_taxa(taxa_sums(.) > 0, .) 
+p6 = show_candida_plot_by_rank(phy=myphy, Site="Tracheostomy site")  + 
+             theme(legend.position = "none",
+              axis.text.y = element_blank())
+
+myphy =  subset_samples(its_match2, SiteID=="Ic") %>%
+      prune_samples(sample_sums(.) > 0, .) %>%
+      prune_taxa(taxa_sums(.) > 0, .) 
+p7 = show_candida_plot_by_rank(phy=myphy, Site="Inguinal crease")  + 
+             theme(legend.position = "none",
+              axis.text.y = element_blank())
+
+
+myphy =  subset_samples(its_match2, SiteID=="Fg") %>%
+      prune_samples(sample_sums(.) > 0, .) %>%
+      prune_taxa(taxa_sums(.) > 0, .) 
+p8 = show_candida_plot_by_rank(phy=myphy, Site="Fingertips/Palms") + 
+             theme(legend.position = "none",
+              axis.text.y = element_blank())
+
+
+myphy =  subset_samples(its_match2, SiteID=="Tw") %>%
+      prune_samples(sample_sums(.) > 0, .) %>%
+      prune_taxa(taxa_sums(.) > 0, .) 
+p9 = show_candida_plot_by_rank(phy=myphy, Site="Toeweb") + 
+             theme(legend.position = "none",
+              axis.text.y = element_blank())
+
+
+myphy =  subset_samples(its_match2, SiteID=="Ne") %>%
+      prune_samples(sample_sums(.) > 0, .) %>%
+      prune_taxa(taxa_sums(.) > 0, .) 
+p10 = show_candida_plot_by_rank(phy=myphy, Site="Neck") + 
+             theme(legend.position = "none",
+              axis.text.y = element_blank())
+
+#### FIGURE LEGEND
+mylegend = show_candida_plot_by_rank(phy=its_match2, Site="All")  + 
+             theme(legend.position = "bottom") +guides(fill=guide_legend(ncol=10))
+
+fungi_p = get_legend(mylegend)
+
+```
+
+
+
+
+```{r, fig.width=12}
+### Make Figure 2a
+Figure2_Legend <- cowplot::get_legend(mylegend)
+Figure2 <- cowplot::plot_grid((p1 + theme(legend.position = "none")), 
+                            (p2 + theme(legend.position = "none")), 
+                            (p3 + theme(legend.position = "none")), 
+                            (p4 + theme(legend.position = "none")),
+                            (p5 + theme(legend.position = "none")),
+                            (p6 + theme(legend.position = "none")), 
+                            (p7 + theme(legend.position = "none")),
+                            (p8 + theme(legend.position = "none")),
+                            (p9 + theme(legend.position = "none")),                            
+                            (p10 + theme(legend.position = "none")),                           
+                          ncol = 10, hjust = -2.75, vjust = 1.5)
+Figure2a <- cowplot::plot_grid(Figure2, Figure2_Legend, nrow = 2)
+ggsave(Figure2a, file="~/Desktop/proctor_manuscript/Figure2/Figure2a.pdf",  width = 30, height = 6, units ="in",dpi = 300, device = "pdf")
+ggsave(Figure2a, file="~/Desktop/proctor_manuscript/Figure2/Figure2a.eps",  width = 30, height = 6, units ="in",dpi = 300, device = "eps")
+
+Figure2a
+```
+
+### Figure 2B: Plot the bacterial data 
+
+Panel B: Each panel encompasses samples for the specified body site with bars representing the relative abundance of taxa for each patient. The inner black curve represents the relative abundance of C. auris for each sample at that site. b) Relative abundance of bacteria colored by Phylum reveals site-specific associations of C. auris with Proteobacteria.  
+
+
+
+```{r, fig.height=3}
+
+rank_samples_bygenus_and_plot <- function(phy, Site){
+    map = data.frame(sample_data(phy)) %>%
+      dplyr::select(., c("Fungal.Matcher", "percentAuris", "Cauris_Result"))
+    rownames(map) = NULL
+    myranks = map %>%
+      arrange(., percentAuris) %>%
+      mutate(., Rank=order(percentAuris))%>%
+      dplyr::select(., c("Fungal.Matcher", "Rank"))
+    myranks$Fungal.Matcher = as.factor(as.character(myranks$Fungal.Matcher))
+    myranks$Fungal.Matcher = str_replace_all(myranks$Fungal.Matcher, ";", ".")
+    
+    mydf = phyToDf(myphy, "Phylum")
+    df = plyr::join(mydf, myranks)
+    df = subset(df, Cauris_Result %in% c(0, 1))
+      p = ggplot(df) +
+            geom_col(aes(x=Rank, y=value, fill=Phylum), position="stack", width=1)  +
+            ylab("") +   scale_color_manual(values=ISU_secondary_palette) +
+            scale_fill_manual(values=ISU_secondary_palette) + ylim(0, 1) +
+            geom_line(aes(x=Rank, y = percentAuris, group = 1), size=1) + theme_classic()+
+        theme(plot.title = element_text(size = 6),
+              axis.title.x=element_blank(),
+              axis.text.x=element_blank(),
+              axis.ticks.x=element_blank())
+    return(p)
+    }
+
+
+myphy =  subset_samples(bac_match, SiteID=="An") %>%
+      prune_samples(sample_sums(.) > 0, .) %>%
+      prune_taxa(taxa_sums(.) > 0, .) 
+p11 = rank_samples_bygenus_and_plot(phy=myphy, Site="Peri-anus")+ 
+             theme(legend.position = "none", 
+                  text = element_text(size=14),
+        axis.text.y = element_text(angle=0, hjust=1))  +
+  ylab("Relative Abundance") 
+
+
+
+myphy =  subset_samples(bac_match, SiteID=="Ax") %>%
+      prune_samples(sample_sums(.) > 0, .) %>%
+      prune_taxa(taxa_sums(.) > 0, .) 
+p12 = rank_samples_bygenus_and_plot(phy=myphy, Site="Axilla") + 
+             theme(legend.position = "none",
+              axis.text.y = element_blank())
+
+
+myphy =  subset_samples(bac_match, SiteID=="Bu/To") %>%
+      prune_samples(sample_sums(.) > 0, .) %>%
+      prune_taxa(taxa_sums(.) > 0, .) 
+p13 = rank_samples_bygenus_and_plot(phy=myphy, Site="Buccal Mucosa / Tongue")+ 
+             theme(legend.position = "none",
+              axis.text.y = element_blank())
+
+
+myphy =  subset_samples(bac_match, SiteID=="N") %>%
+      prune_samples(sample_sums(.) > 0, .) %>%
+      prune_taxa(taxa_sums(.) > 0, .) 
+p14 = rank_samples_bygenus_and_plot(phy=myphy, Site="Nares")+ 
+             theme(legend.position = "none",
+              axis.text.y = element_blank())
+
+myphy =  subset_samples(bac_match, SiteID=="Ea") %>%
+      prune_samples(sample_sums(.) > 0, .) %>%
+      prune_taxa(taxa_sums(.) > 0, .) 
+p15 = rank_samples_bygenus_and_plot(phy=myphy, Site="Ear canal")+ 
+             theme(legend.position = "none",
+              axis.text.y = element_blank())
+
+
+
+myphy =  subset_samples(bac_match, SiteID=="Tc") %>%
+      prune_samples(sample_sums(.) > 0, .) %>%
+      prune_taxa(taxa_sums(.) > 0, .) 
+p16 = rank_samples_bygenus_and_plot(phy=myphy, Site="Tracheostomy site")+ 
+             theme(legend.position = "none",
+              axis.text.y = element_blank())
+
+myphy =  subset_samples(bac_match, SiteID=="Ic") %>%
+      prune_samples(sample_sums(.) > 0, .) %>%
+      prune_taxa(taxa_sums(.) > 0, .) 
+p17 = rank_samples_bygenus_and_plot(phy=myphy, Site="Inguinal crease")+ 
+             theme(legend.position = "none",
+              axis.text.y = element_blank())
+
+
+myphy =  subset_samples(bac_match, SiteID=="Fg") %>%
+      prune_samples(sample_sums(.) > 0, .) %>%
+      prune_taxa(taxa_sums(.) > 0, .) 
+p18 = rank_samples_bygenus_and_plot(phy=myphy, Site="Fingertips/Palms")+ 
+             theme(legend.position = "none",
+              axis.text.y = element_blank())
+
+
+myphy =  subset_samples(bac_match, SiteID=="Tw") %>%
+      prune_samples(sample_sums(.) > 0, .) %>%
+      prune_taxa(taxa_sums(.) > 0, .) 
+p19 = rank_samples_bygenus_and_plot(phy=myphy, Site="Toeweb")+ 
+             theme(legend.position = "none",
+              axis.text.y = element_blank())
+
+
+myphy =  subset_samples(bac_match, SiteID=="Ne") %>%
+      prune_samples(sample_sums(.) > 0, .) %>%
+      prune_taxa(taxa_sums(.) > 0, .) 
+p20 = rank_samples_bygenus_and_plot(phy=myphy, Site="Neck")+ 
+             theme(legend.position = "none",
+              axis.text.y = element_blank())
+
+mylegend = rank_samples_bygenus_and_plot(phy=bac_match, Site="Peri-Anus") +
+             theme(legend.position = "bottom") +guides(fill=guide_legend(ncol=10))
+```
+
+
+
+```{r, fig.width=12}
+### Make Figure 2b
+Figure2_Legend <- cowplot::get_legend(mylegend)
+Figure2 <- cowplot::plot_grid((p11 + theme(legend.position = "none")), 
+                            (p12 + theme(legend.position = "none")), 
+                            (p13 + theme(legend.position = "none")),
+                            (p14 + theme(legend.position = "none")),
+                            (p15 + theme(legend.position = "none")),
+                            (p16 + theme(legend.position = "none")), 
+                            (p17 + theme(legend.position = "none")),
+                            (p18 + theme(legend.position = "none")),
+                            (p19 + theme(legend.position = "none")),                            
+                            (p20 + theme(legend.position = "none")),                           
+                          ncol = 10, hjust = -2.75, vjust = 1.5)
+Figure2b <- cowplot::plot_grid(Figure2, Figure2_Legend, nrow = 2)
+ggsave(Figure2b, file="~/Desktop/proctor_manuscript/Figure2/Figure2b.eps",  width = 30, height = 6, units ="in",dpi = 300, device = "eps")
+ggsave(Figure2b, file="~/Desktop/proctor_manuscript/Figure2/Figure2b.pdf",  width = 30, height = 6, units ="in",dpi = 300, device = "pdf")
+Figure2b
+
+```
+
+
+### Now let's look at variables int he bacterial table that segregate with colonization status
+```{r, fig.height=5, fig.width=5}
+bacterial.splsda <- mixOmics::splsda(clrB, Y1, ncomp=2, near.zero.var=TRUE) # 1 Run the method
+mixOmics::plotIndiv(bacterial.splsda, ellipse = TRUE, star=TRUE, ind.names = FALSE)                          # 2 Plot the samples
+```
+
+```{r}
+setEPS()
+pdf("~/Desktop/proctor_manuscript/Figure2/Figure2c.pdf")
+
+par(mfrow=c(1,1)) 
+mixOmics::plotIndiv(bacterial.splsda, ellipse = TRUE, star=TRUE, ind.names = FALSE)                          # 2 Plot the samples
+dev.off()
+```
+
+
+```{r}
+tax1 = data.frame(bac_filt@tax_table@.Data) %>%
+  dplyr::select(., c("Kingdom", "Class", "Order", "Family", "Genus", "Highest.Rank"))
+tax1$Highest.Rank = str_replace_all(tax1$Highest.Rank, " ", ".")
+loadings.16s = data.frame(bacterial.splsda$loadings$X)
+loadings.16s$Highest.Rank= rownames(loadings.16s)
+loadings.16s$Highest.Rank = str_replace_all(loadings.16s$Highest.Rank, " ", ".")
+loadings.16s = plyr::join(loadings.16s, tax1)
+
+loadings.16s = loadings.16s[with(loadings.16s, order(comp1)),]
+ordering16s = as.vector(loadings.16s$Highest.Rank)
+loadings.16s$Highest.Rank  <- factor(loadings.16s$Highest.Rank, levels = ordering16s)
+loadings.16s$group = ifelse(loadings.16s$comp1 < 0, "Culture Negative", "Culture Positive")
+
+
+myfont <- element_text(face = "italic",size = 12)
+
+Figure2d = ggplot() +
+  geom_col(data=loadings.16s, aes(Highest.Rank, comp1, fill=group)) +
+  coord_flip()+ scale_fill_manual(values=c("#6699FF", "#FF9933"), name="Group")+
+  theme_classic() +
+  ylab("Component 1")+ xlab("")+ theme(axis.text.y = myfont)
+
+
+Figure2d
+
+ggsave(Figure2d, file="~/Desktop/proctor_manuscript/Figure2/Figure2d.eps",  width = 6, height = 6, units ="in",dpi = 300, device = "eps")
+
+```
+
+### Let's look at thee performance of the model 
+```{r}
+#Performance 
+set.seed(123) # for reproducibility 
+MyPerf.selected.diablo <- mixOmics::perf(bacterial.splsda, validation = 'Mfold', folds = 2, 
+                   nrepeat = 100, 
+                   dist = c('centroids.dist', "max.dist", "mahalanobis.dist")) #,                    design=design3
+
+bacterial.splsda$choice.ncomp
+bacterial.splsda$MajorityVote.error.rate
+auroc(bacterial.splsda)
+```
+
+
+#### Let's build a multiple table model
+
+
+Select variables in the bacterial table
+```{r, fig.height=4, fig.width=4}
+bacterial.splsda <- splsda(clrB, Y1, ncomp=8, near.zero.var=TRUE) # 1 Run the method
+plotIndiv(bacterial.splsda, ellipse = TRUE, star=TRUE, ind.names = FALSE)                          # 2 Plot the samples
+plotVar(bacterial.splsda, cutoff=0.4, var.names = FALSE)
+plotLoadings(bacterial.splsda)
+keep.bacterial.taxa = selectVar(bacterial.splsda, comp=1)$name   
+```
+
+Select variables in the fungal table
+```{r, fig.height=4, fig.width=4}
+fungal.splsda <- splsda(clrF, Y1, ncomp=8, near.zero.var=TRUE) # 1 Run the method
+plotIndiv(fungal.splsda, ellipse = TRUE, star=TRUE, ind.names = FALSE)                          # 2 Plot the samples
+plotVar(fungal.splsda, cutoff=0.4, var.names = TRUE)
+plotVar(fungal.splsda, cutoff=0.4, var.names = FALSE)
+keep.fungal.taxa = selectVar(fungal.splsda, comp=1)$name   
+```
+
+subset the taxa on the selected variables
+```{r}
+#select the taxa
+clrB2 <- clrB[, keep.bacterial.taxa]
+clrF2 <- clrF[, keep.fungal.taxa]
+
+#order the data frames so they are the same
+clrB2 = clrB2[rownames(clin_scales),]  
+clrF2 = clrF2[rownames(clin_scales),]  
+
+
+### Within analysis
+clinW <- withinVariation(X=clin_scales, design=design1)
+clrBw <- withinVariation(X = clrB2, design = design2)
+clrFw <- withinVariation(X = clrF2, design = design2)
+
+### make table lists
+Xa <- list(clinical=clin_scales, fungi=clrFw, bacteria=clrBw)
+Xa <- list( fungi=clrFw, bacteria=clrBw)
+```
+
+
+### Run the first model; use the first time point; account for within site variation
+
+```{r, fig.height=4, fig.width=8}
+set.seed(861)
+MyResult.diablo <- block.splsda(Xa, Y1,    scale=TRUE,   near.zero.var=TRUE, scheme="centroid", ncomp = 4)
+plotIndiv(MyResult.diablo, 
+          ind.names = FALSE, 
+          ellipse = TRUE,
+          star=TRUE,
+          legend=TRUE,
+          abline = TRUE)
+
+```
+
+
+```{r, fig.height=4, fig.width=4}
+plotVar(MyResult.diablo,
+      comp = c(1, 2),
+      cutoff = 0.25,
+      rad.in = 0.5,
+      cex=c(4, 4),
+      var.names = FALSE,
+      style="ggplot2",
+      overlap = TRUE,
+      axes.box = "all",
+      label.axes.box = "both")
+```
+
+
+```{r, fig.height=4, fig.width=4}
+plotVar(MyResult.diablo,
+      comp = 1:2,
+      cutoff = 0.25,
+      rad.in = 0.5,
+      cex=c(3, 3),
+      var.names = TRUE,
+      style="ggplot2",
+      overlap = TRUE,
+      axes.box = "all",
+      label.axes.box = "both")
+
+```
+
+
+```{r, fig.height=8}
+tax1 = data.frame(bac_match@tax_table@.Data) %>%
+  dplyr::select(., c("Kingdom", "Class", "Order", "Family", "Genus", "Highest.Rank"))
+tax1$Highest.Rank = str_replace_all(tax1$Highest.Rank, " ", ".")
+loadings.16s = data.frame(MyResult.diablo$loadings$bacteria)
+loadings.16s$Highest.Rank= rownames(loadings.16s)
+loadings.16s$Highest.Rank = str_replace_all(loadings.16s$Highest.Rank, " ", ".")
+loadings.16s = plyr::join(loadings.16s, tax1)
+
+loadings.16s = loadings.16s[with(loadings.16s, order(comp1)),]
+ordering16s = as.vector(loadings.16s$Highest.Rank)
+loadings.16s$Highest.Rank  <- factor(loadings.16s$Highest.Rank, levels = ordering16s)
+
+
+tax1 = data.frame(its_match@tax_table@.Data) %>%
+  dplyr::select(., c("Kingdom", "Class", "Order", "Family", "Genus", "Highest.Rank"))
+tax1$Highest.Rank = str_replace_all(tax1$Highest.Rank, " ", ".")
+loadings.its = data.frame(MyResult.diablo$loadings$fungi)
+loadings.its$Highest.Rank= rownames(loadings.its)
+loadings.its$Highest.Rank = str_replace_all(loadings.its$Highest.Rank, " ", ".")
+loadings.its = plyr::join(loadings.its, tax1)
+loadings.its = loadings.its[with(loadings.its, order(comp1)),]
+orderingITS = as.vector(loadings.its$Highest.Rank)
+loadings.its$Highest.Rank  <- factor(loadings.its$Highest.Rank, levels = orderingITS)
+
+  
+### Coordinate 1
+p1 = ggplot() +
+  geom_col(data=loadings.its, aes(Highest.Rank, comp1)) +
+  coord_flip()
+  
+p2 = ggplot() +
+  geom_col(data=loadings.16s, aes(Highest.Rank, comp1)) +
+  coord_flip()
+
+### Coordinate 2
+loadings.16s = loadings.16s[with(loadings.16s, order(comp2)),]
+ordering16s = as.vector(loadings.16s$Highest.Rank)
+loadings.16s$Highest.Rank  <- factor(loadings.16s$Highest.Rank, levels = ordering16s)
+
+loadings.its = loadings.its[with(loadings.its, order(comp2)),]
+orderingITS = as.vector(loadings.its$Highest.Rank)
+loadings.its$Highest.Rank  <- factor(loadings.its$Highest.Rank, levels = orderingITS)
+
+
+
+p3 = ggplot() +
+  geom_col(data=loadings.its, aes(Highest.Rank, comp2)) +
+  coord_flip()
+  
+p4 = ggplot() +
+  geom_col(data=loadings.16s, aes(Highest.Rank, comp2)) +
+  coord_flip()
+
+grid.arrange(p1, p2, p3, p4, ncol=2)
+```
+
+
+#### Let's look at explicit correlations
+Since the multiple table model threw an error saying the direction of the correlation may not be accurately represented in the model let's just look at straight up correlations between each taxa's distribution and the distribution of Candida auris across samples. We will use a linear mixed effects model to account for multiple measures within an indidivudal
+
+`### Mixed effects sequencing data - The model: abundance ~ cauris chg_conc + SiteID + (1 | Unique_ptid) +ϵ
+
+Merge the its and bacterial tables
+```{r}
+#get rid of the tree - fungal
+otus = otu_table(its_match)
+map = sample_data(its_match)
+tax = its_match@tax_table@.Data
+its_match = merge_phyloseq(otus, map, tax_table(tax))
+
+
+#subset the its table to eliminate noisy taxa; otherwise model fails
+library(DESeq2);library(genefilter)
+filtergroup = genefilter::filterfun(genefilter::kOverA(k=20, A=10)) #k = number of samples; A = abundance
+#filter  taxa 
+        filtPhy = filter_taxa(its_match, filtergroup, prune=TRUE) 
+        filtPhy = prune_taxa(taxa_sums(filtPhy) > 0, filtPhy) 
+        filt_its = subset_samples(filtPhy, Unique_ptid != 32)
+
+#generate a combined fungal/bacterial table so we can adjust pvalues in the regression appropriately
+phy = merge_phyloseq(bac_match, filt_its)      
+```
+
+
+```{r}
+set.seed(78927)
+phy = transform_sample_counts(phy, function(x) compositions::clr(x)) 
+
+#make a map for the regression
+map = data.frame(sample_data(phy)) %>%
+  dplyr::select(., c("sqrt_cauris", "Unique_ptid", "SiteID"))
+
+#convert site and survey period to numeric
+map$SiteID = as.numeric(factor(map$SiteID))
+map = data.frame(scale(map))
+
+#get the otu table of the centered log ratio table
+otus = data.frame(otu_table(phy))
+
+attach(map)
+all=data.frame(cbind(otus, map))
+
+#set up empty lists
+mod <- list()
+out <- list()
+adjp <- list()
+
+#https://stackoverflow.com/questions/57590176/adjust-p-values-obtained-with-lmertestlmer-for-multiple-comparisons
+adjMC <- function( model_name ) {
+  model_glht <- glht(model_name)
+  model_MCadj <- summary(model_glht, test = adjusted('holm')) # Bonferroni-Holm 
+  return(model_MCadj)
+}
+
+library(multcomp)
+for(i in names(otus)[-1]){
+  mod[[i]] <- lmerTest::lmer(get(i) ~ sqrt_cauris   + SiteID +
+                               (1 | Unique_ptid  ), 
+      data = all)
+  adjp[[i]]  = adjMC(mod[[i]])
+  out[[i]] = broom.mixed::tidy(adjp[[i]], conf.int = TRUE, .name_repair = "unique")
+}
+tax = data.frame(phy@tax_table@.Data) 
+out = out %>% map_dfr(~ .x %>% as_tibble(), .id = "Highest.Rank") 
+out$Highest.Rank = str_replace_all(out$Highest.Rank, "([.])", " ")
+
+df = data.frame(out) %>%
+  plyr::join(tax) %>%
+  subset(., contrast=="sqrt_cauris")  
+
+#make a volcano plot
+library(RColorBrewer)
+pal <- brewer.pal(n = 4, name = 'Set1')
+df$adj.p.value = as.numeric(as.character(df$adj.p.value))
+my.annotation = subset(df, adj.p.value  < 0.05 & estimate > 0.1 | estimate <= -0.1)
+anno2 = subset(df, Highest.Rank %in% c("Acinetobacter baumannii", "Pseudomonas aeruginosa"))
+my.annotation = data.frame(rbind(my.annotation, anno2))
+df$Highest.Rank = as.character(as.factor(df$Highest.Rank))
+df$neglog = -log10(df$adj.p.value)
+df$neglog  = ifelse(df$neglog=="Inf", 12, df$neglog)
+      
+## Create a column to indicate which genes to label
+df$species.label = ifelse(df$Highest.Rank %in% my.annotation$Highest.Rank, "TRUE", "FALSE")
+myannotations = subset(df, species.label==TRUE)
+```
+
+let's see a volcano plot of significant taxa
+```{r}
+Figure3C = ggplot(df) +
+  geom_point(aes(x = estimate, y = neglog), alpha=0.5) +
+  geom_text_repel(data=myannotations, aes(x = estimate, y = neglog, label = Highest.Rank),size=4) +
+  xlab("Regression Coefficient") + 
+  ylab("-log10 adjusted p-value")  +
+  xlim(-1.2, 1.2)  +
+  geom_vline(xintercept = -0.1, linetype='dashed', color="gray") + 
+  geom_vline(xintercept = 0.1, linetype='dashed', color="gray") +
+  geom_hline(yintercept = -log(0.05),  linetype='dashed', color="gray") + 
+  theme_classic() +
+  scale_color_manual(values=c("#377EB8" ,"#4DAF4A"))+
+    theme(text = element_text(size=14),
+        axis.text.x = element_text(angle=0, hjust=1)) + theme(legend.position = "none") 
+
+Figure3C
+
+```
+
+
+print the table
+```{r}
+myannotations = subset(df, adj.p.value  < 0.05 )
+myannotations = myannotations[with(myannotations, order(estimate)),]
+
+myannotations$upper = myannotations$std.error + myannotations$estimate
+myannotations$lower = myannotations$estimate- myannotations$std.error
+ordering = as.vector(myannotations$Highest.Rank)
+myannotations$Highest.Rank  <- factor(myannotations$Highest.Rank, levels = ordering)
+p = ggplot(myannotations, aes(Highest.Rank, estimate, color=Phylum)) + geom_point() +
+        geom_errorbar(aes(ymin=upper, ymax=lower), width=.2,
+                 position=position_dodge(.9)) + coord_flip() + 
+  theme_classic()
+
+p
+```
