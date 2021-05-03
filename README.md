@@ -1,5 +1,7 @@
 # candida_auris
 
+**Provisional Acceptance at Nature Medicine, April 2021**
+
 **Title: Integrated genomic, epidemiologic investigation of Candida auris skin colonization in a skilled nursing facility**
 
 Authors: Diana M Proctor1, Thelma Dangana2, D. Joseph Sexton3, Christine Fukuda2, Rachel D Yelin2, Mary
@@ -20,7 +22,7 @@ Institutes of Health, Bethesda, MD 20892, USA
 *e-mail: jsegre@nhgri.nih.gov; mhayden@rush.edu
 
 
-**Provisional Acceptance at Nature Medicine**
+
 
 
 **Abstract**
