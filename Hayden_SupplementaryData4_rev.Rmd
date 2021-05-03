@@ -1,0 +1,615 @@
+---
+title: "Figure 3: High concentrations of CHG reduce the likelihood of colonization, but are rarely achieved"
+author: "Diana Proctor"
+date: "03/26/220"
+output: html_document
+---
+last updated: `r format(Sys.Date(), format="%B %d %Y")`
+
+
+***
+
+**draft: submission to Nature Medicine October 2020**
+
+
+*Manuscript Title*: Integrated genomic, epidemiologic investigation of Candida auris skin colonization 
+
+*Authors*: Diana M Proctor1, Thelma Dangana2, D. Joseph Sexton3, Christine Fukuda2, Rachel D Yelin2, Mary Stanley2, Pamela B Bell2, Sangeetha Baskaran2, Clay Deming1, Qiong Chen1, Sean Conlan1, NISC Comparative Sequencing Program4, Rory M Welsh3, Snigdha Vallabhaneni3,5, Tom Chiller3, Kathleen Forsberg3, Stephanie R. Black6, Massimo Pacilli6, Heidi H Kong7, Michael Y Lin2, Michael E Schoeny8, Anastasia P Litvintseva3, Julia A Segre1+, Mary K Hayden2+
+
+
+*Affiliations*:
+
+- 1Microbial Genomics Section, Translational and Functional Genomics Branch, National Human Genome Research Institute, National Institutes of Health, Bethesda, MD 20892, USA
+
+- 2 Department of Internal Medicine, Division of Infectious Diseases, Rush University Medical Center, Chicago, IL 60612, USA.
+
+- 3Mycotic Diseases Branch, Centers for Disease Control and Prevention, Atlanta, GA 30333, USA.
+
+- 4NIH Intramural Sequencing Center, National Human Genome Research Institute, National Institutes of Health, Bethesda, MD 20892, USA.
+
+- 5Division of Healthcare Quality Promotion, NCEZID, CDC, USA
+
+- 6Communicable Disease Program, Chicago Department of Public Health, Chicago, IL, 60612, USA.
+
+- 7Dermatology Branch, National Institute of Arthritis and Musculoskeletal and Skin Diseases, National Institutes of Health, Bethesda, MD 20892, USA
+
+- 8College of Nursing, Rush University, Chicago, IL 60612, USA.
+
+- +Contributed equally
+
+***
+
+
+
+### Description of the dataset
+
+Here, we seek to examine the impact of CHG on the microbiome, as well as levels of variation in CHG concentration by body site. We have CHG concentrations for the first time point at each body site (Ic, An, Fg, Ax, Ne, Tw). We also have the bacterial and fungal data tables, which includes 365 taxa across 1115 samples.
+
+To accomplish this, we read in the following data:
+
+1. bac_match.rds
+2. its_match.rds
+3. sitecode_to_factored_sites.csv
+4. Cauris_Analytic_2020-5-20.csv
+5. CHG_oddsRatios_Schoeny.csv (not provided)
+
+
+### Here, we render the following figures:
+
+- Figure 3
+
+Footnote: The logistic mixed effects model presented in Panel B, and embedded within data object 5 in the list above, was performed by M. Schoeny at Rush University. The code to render the figure is presented here, but the analysis itself was conducted in SAS.
+
+***
+
+
+
+
+```{r}
+#set global knitting options
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, error = FALSE, fig.width = 6, fig.height = 5)
+```
+
+```{r}
+# load package method from from Dan Sprokett
+
+# set seed
+set.seed(78979)
+#define packages
+packages <- c("knitr", 
+              "ggplot2", 
+              "scales", 
+              "ggeffects", 
+              "lme4", 
+              "stringr",
+              "RColorBrewer", 
+              "gridExtra", 
+              "phyloseq",
+              "dabestr",
+              "tidyr",
+              "dplyr",
+              "purrr",
+              "ggpubr",
+              "ggrepel",
+              "broom.mixed",
+              "lmerTest",
+              "cowplot",
+              "reshape2")
+
+# install packages from bioconductor
+BiocManager::install(setdiff(packages,installed.packages()), update=FALSE)
+n <- length(packages) - sum(sapply(packages,require,character.only=TRUE))
+
+# print if packages loaded properly
+if(n == 0){
+  print("All necessary R packages loaded properly")
+} else {
+  print(paste0(n, " R packages did not load properly"))
+}
+
+```
+
+Define functions and then read in the data
+```{r}
+pal_freiburg_info <- c("#2a6ebb", "#a7c1e3", "#7b2927", "#de3831", "#739600", "#92d400", 
+                       "#4d4f53", "#747678", "#b2b4b3", "#d5d6d2", "#e98300", "#efbd47")
+
+ISU_secondary_palette <- c("#3E4827", "#76881D", "#A2A569",
+                           "#003D4C", "#006BA6", "#7A99AC",
+                           "#7C2529", "#9A3324", "#BE531C",
+                           "#8B5B29", "#B9975B", "#EED484",
+                           "#6E6259", "#707372", "#ACA39A", "#C8102E")
+
+ISU_primary_palette   <- c("#C8102E", "#F1BE48", "#524727", 
+                           "#9B945F", "#CAC7A7")
+
+#define color palettes
+set.seed(1009)
+n <- 50
+qual_col_pals = brewer.pal.info[brewer.pal.info$category == 'qual',]
+col_vector = unlist(mapply(brewer.pal, qual_col_pals$maxcolors, rownames(qual_col_pals)))
+
+```
+
+Read in the data
+```{r}
+bac_match = readRDS(file="~/Desktop/candida_auris_rush/merged_16s_bac_match_cauris_clinical_map_withsqrt_withtree_withcoo_2020-03-19.rds")
+merged_16s = readRDS(file="~/Desktop/candida_auris_rush/merged_16s_nonglom_cauris_clinical_map_withsqrt_withtree_withcoo_2020-03-19.rds")
+its_match = readRDS(file="~/Desktop/candida_auris_rush/merged_its_its_match3_2020-04-02.rds") %>%
+      subset_taxa(., Highest.Rank != "Less_than_10_per_ASV Less_than_10_per_ASV") %>%
+      subset_taxa(., Highest.Rank != "Fungal sp.")
+
+sites =  read.csv("~/Desktop/candida_auris_rush/sitecode_to_factored_sites.csv")
+full.dat = read.csv("~/Desktop/candida_auris_rush/manuscript/data/Cauris_Analytic_2020-5-20.csv") %>%
+  dplyr::select(., c("Unique_ptid", "Survey_Period", "Cauris_Result", 
+                     "site", "chg_conc", "CFUTotal_Cauris", "chgswab", "CFUTransform_Cauris"))  %>%
+  plyr::join(., sites)
+
+
+```
+
+
+### Figure 3A: Let's look at chg concentration as a function of body site
+
+Figure 3: High concentrations of CHG reduce the likelihood of colonization, but are rarely achieved. a) Gardner Altman estimation plot comparing the mean difference in CHG concentrations (ug/mL) across all body sites. Upper panel: scatter plot of CHG concentration plotted as a function of body site (Ic: Inguinal Crease; An: Perianus; Fg: Fingertips; Ax: Axilla; Ne: Neck; Tw: Toeweb) for survey 1. Lower Panel: point estimates for the mean difference between CHG concentration (ug/mL) at each body site and the Ic, the site reaching the highest average CHG dosage. Error bars encompass the 95% confidence interval surrounding each estimate while the histogram reflects the sampling distribution from a non-parametric bootstrap. 
+```{r, fig.height=4, fig.width=4}
+full.dat$complete = complete.cases(full.dat$chg_conc)
+full.dat = subset(full.dat, complete==TRUE)
+full.dat$CFUTransform_Cauris[is.na(full.dat$CFUTransform_Cauris)] <- 0
+full.dat$group = paste0(full.dat$Unique_ptid, ";", full.dat$SiteID)
+full.dat$`CHG Concentration ug/mL (log2)` = log2(1+full.dat$chg_conc)
+
+t1 = subset(full.dat, Survey_Period==1)
+Figure3A <- dabestr::dabest(t1, Site.Extended, `CHG Concentration ug/mL (log2)` ,
+                             idx=c("Inguinal (Ic)", "Peri-Anal Skin (An)",  "Palm/Fingertips (Fg)", 
+                                   "Axilla (Ax)", "Neck (Ne)" , "Toe Web (Tw)" ),
+                             paired = FALSE) %>% 
+                      mean_diff() 
+
+plot(Figure3A, palette = "Dark2")
+ggsave(plot(Figure3A, palette = "Dark2"), file="~/Desktop/proctor_manuscript/Figure3/Figure3a.pdf", device="pdf",
+       width = 12, height = 8)
+```
+
+
+### Figure3B: Plot the logistic mixed effects model from Michael Schoeny
+
+Each point represents the odds of C. auris colonization from a logistic mixed effects model plotted against CHG concentration (ug/mL). Error bars encompass 95% confidence intervals. The solid horizontal lines demarcate the odds of colonization per respective group while the dashed lines encompass the 95% CI surrounding each estimate. 
+
+```{r, fig.height=4, fig.width=4}
+dat = read.csv("~/Desktop/candida_auris_rush/manuscript/CHG_oddsRatios_Schoeny.csv")
+dat$foo = dat$CHG
+dat$foo = ifelse(dat$foo==">2500", 2500, dat$CHG)
+ordering = unique(dat$CHG)
+dat$CHG  <- factor(dat$CHG, levels = ordering)
+
+
+
+y1 = mean(subset(dat, CHG %in% c("625", "1250", ">2500"))$Odds)
+y2 = mean(subset(dat, CHG %in% c("625", "1250", ">2500"))$Odds)
+
+high = subset(dat, CHG %in% c("625", "1250", ">2500"))
+high$start=615
+high$end=">2500"
+low = subset(dat, !(CHG %in% c("625", "1250", ">2500")))
+low$start=0
+low$end="313"
+
+#generate the plot
+Figure3B = ggplot(dat, aes(x =CHG, y = Odds)) + geom_point(size=6) +
+        theme_classic() +
+        geom_errorbar(aes(ymin=X95U.u, ymax=X95L.l), width=.2,
+                 position=position_dodge(.9))  + xlab("") + 
+        ylim(0, 1) + xlab("CHG Concentration (ug/mL)") + 
+        ylab("Odds of Colonization (95% Confidence Intervals)")  +
+  geom_segment(aes(x = "0", y = 0.31, xend = "312.5", yend = 0.31),
+               colour="blue") +
+  geom_segment(aes(x = "0", y = 0.21, xend = "312.5", yend = 0.21), linetype="dashed",
+               colour="blue") +
+  geom_segment(aes(x = "0", y = 0.46, xend = "312.5", yend = 0.46), linetype="dashed",
+               colour="blue") +
+  geom_segment(aes(x = "625", y = 0.08, xend = ">2500", yend = 0.08),
+               colour="gray")+
+  geom_segment(aes(x = "625", y = 0.03, xend = ">2500", yend = 0.03),
+               linetype="dashed", colour="gray")+
+  geom_segment(aes(x = "625", y = 0.21, xend = ">2500", yend = 0.21),
+               linetype="dashed", colour="gray") +
+  theme(axis.text.x = element_text( size = 20, angle = 45, hjust = .5, vjust = .5, face = "plain"),
+        axis.text.y = element_text(size = 20, angle = 0, hjust = 1, vjust = 0, face = "plain"),  
+        axis.title.x = element_text( size = 20, angle = 0, hjust = .5, vjust = 0, face = "plain"),
+        axis.title.y = element_text(size = 20, angle = 90, hjust = .5, vjust = .5, face = "plain"))
+
+Figure3B
+
+ggsave(Figure3B, file="~/Desktop/proctor_manuscript/Figure3/Figure3b.pdf", device="pdf",
+       width = 6, height = 6)
+```
+
+
+
+### Figure 3C 
+
+- The model: abundance ~ cauris chg_conc  +  SiteID + (1 | Unique_ptid/Survey_Period) +ϵ
+
+Volcano plot of statistical significance (-Log adjusted P-value) against the regression coefficients from the linear mixed effects models. Each point represents a regression coefficient for a bacterial or fungal species. The vertical lines demarcate regression coefficients of -0.2 and 0.2. Species having Holm adjusted p-values < 0.05 are highlighted in green while non-significant taxa are in blue. Species exhibiting a positive association with CHG concentration (estimate > 0.2, Holm adjusted p < 0.05)  include Providencia stuartii, Proteus mirabilis, Candida tropicalis, Saccharomyces cerevisiae and Morganella morganii. Species exhibiting a negative correlation with CHG (estimate < -0.2, Holm adjusted p < 0.05) include Staphylococcus pettenkoferi, Anaerococcus octavius, Malassezia slooffiae, and Campylobacter ureolyticus.
+
+```{r, fig.height=4, fig.width=4}
+#add a variable testing for nas in chg conc' we'll use this to subset the data
+sample_data(bac_match)$chg_conc_yn = is.na(sample_data(bac_match)$chg_conc)
+sample_data(its_match)$chg_conc_yn = is.na(sample_data(its_match)$chg_conc)
+
+#get rid of the tree - bacteria
+otus = otu_table(bac_match)
+map = sample_data(bac_match)
+tax = bac_match@tax_table@.Data
+bac_match = merge_phyloseq(otus, map, tax_table(tax))
+
+#get rid of the tree - fungal
+otus = otu_table(its_match)
+map = sample_data(its_match)
+tax = its_match@tax_table@.Data
+its_match = merge_phyloseq(otus, map, tax_table(tax))
+
+
+#subset the its table to eliminate noisy taxa; otherwise model fails
+library(DESeq2);library(genefilter)
+filtergroup = genefilter::filterfun(genefilter::kOverA(k=20, A=10)) #k = number of samples; A = abundance
+#filter  taxa 
+        filtPhy = filter_taxa(its_match, filtergroup, prune=TRUE) 
+        filtPhy = prune_taxa(taxa_sums(filtPhy) > 0, filtPhy) 
+        filt_its = subset_samples(filtPhy, Unique_ptid != 32)
+
+#generate a combined fungal/bacterial table so we can adjust pvalues in the regression appropriately
+#get the number of taxa
+phy = merge_phyloseq(bac_match, filt_its)      
+ntaxa(phy)
+nsamples(phy)
+
+#subset the phyloseq object on samples with chg conc, specific sites shown in panel a, and clr transform
+chgPhy= subset_samples(phy, chg_conc_yn =="FALSE") %>% 
+  transform_sample_counts(., function(x) compositions::clr(x)) %>% 
+  subset_samples(., SiteID %in% c("Tw", "Fg", "Ic", "An", "Ax"))
+
+
+set.seed(78927)
+#make a map for the regression
+map = data.frame(sample_data(chgPhy)) %>%
+  dplyr::select(., c("chg_conc", "Unique_ptid", "SiteID", "Survey_Period"))
+
+#log transform chg conc
+map$chg_conc = log2(1+map$chg_conc)
+
+#convert site and survey period to numeric
+map$SiteID = as.numeric(factor(map$SiteID))
+map$Survey_Period = as.numeric(as.character(map$Survey_Period))
+map = data.frame(scale(map))
+
+#get the otu table of the centered log ratio table
+otus = data.frame(otu_table(chgPhy))
+
+attach(map)
+all=data.frame(cbind(otus, map))
+
+#set up empty lists
+mod <- list()
+out <- list()
+adjp <- list()
+
+#https://stackoverflow.com/questions/57590176/adjust-p-values-obtained-with-lmertestlmer-for-multiple-comparisons
+adjMC <- function( model_name ) {
+  model_glht <- glht(model_name)
+  model_MCadj <- summary(model_glht, test = adjusted('holm')) # Bonferroni-Holm 
+  return(model_MCadj)
+}
+
+library(multcomp)
+for(i in names(otus)[-1]){
+  mod[[i]] <- lmerTest::lmer(get(i) ~ chg_conc  + SiteID +
+                               (1 | Unique_ptid / Survey_Period  ), 
+      data = all)
+  adjp[[i]]  = adjMC(mod[[i]])
+  out[[i]] = broom.mixed::tidy(adjp[[i]], conf.int = TRUE, .name_repair = "unique")
+}
+keep = colnames(bac_match@tax_table@.Data)[1:8]
+tax = data.frame(filt_its@tax_table@.Data) %>%
+  dplyr::select(., all_of(keep))
+out = out %>% map_dfr(~ .x %>% as_tibble(), .id = "Highest.Rank") 
+out$Highest.Rank = str_replace_all(out$Highest.Rank, "([.])", " ")
+
+df = data.frame(out) %>%
+  plyr::join(tax) %>%
+  subset(., contrast=="chg_conc")  
+
+tax.df = df
+
+#make a volcano plot
+pal <- brewer.pal(n = 4, name = 'Set1')
+df$adj.p.value = as.numeric(as.character(df$adj.p.value))
+my.annotation = subset(df, adj.p.value  < 0.05)
+keepers = c("Staphylococcus pettenkoferi",
+    "Anaerococcus octavius",
+    "Malassezia slooffiae",
+    "Campylobacter ureolyticus",
+    "Morganella morganii",
+    "Saccharomyces cerevisiae",
+    "Candida tropicalis",
+    "Proteus mirabilis",
+    "Providencia stuartii")
+
+df$Highest.Rank = as.character(as.factor(df$Highest.Rank))
+df$neglog = -log10(df$adj.p.value)
+df$neglog  = ifelse(df$neglog=="Inf", 12, df$neglog)
+      
+## Create a column to indicate which genes to label
+df$species.label = ifelse(df$Highest.Rank %in% keepers, "TRUE", "FALSE")
+df$significance = ifelse(df$adj.p.value < 0.05, "significant", "not")
+myannotations = subset(df, species.label==TRUE & estimate > 0.2 | estimate < -0.2)
+
+#plot figure 3c
+Figure3C = ggplot(df) +
+  geom_point(aes(x = estimate, y = neglog,
+                                          color=significance), alpha=0.5) +
+  geom_text_repel(data=myannotations, aes(x = estimate, y = neglog, label = Highest.Rank),size=4) +
+  xlab("Regression Coefficient") + 
+  ylab("-log10 adjusted p-value")  +
+  xlim(-1.2, 1.2)  +
+  geom_vline(xintercept = -0.2, linetype='dashed', color="gray") + 
+  geom_vline(xintercept = 0.2, linetype='dashed', color="gray") +
+  theme_classic() +
+  scale_color_manual(values=c("#377EB8" ,"#4DAF4A"))+
+    theme(text = element_text(size=10),
+        axis.text.x = element_text(angle=0, hjust=1)) + theme(legend.position = "none") +
+  scale_y_continuous(label=comma)
+  
+Figure3C
+ggsave(Figure3C, file="~/Desktop/candida_auris_rush/manuscript/NatureMedicine_revision/Figure3c.pdf", device="pdf",
+       width = 10, height = 10)
+```
+
+
+####  Figure 3d
+
+Let's look at the  taxa with significant coefficients. We'll plot abundance vs. CHG concentration.
+```{r}
+keep = filter(df, adj.p.value < 0.05) %>%
+  filter(., estimate > 0.25 | estimate < -0.25 )
+keep.names = str_replace_all(keep$Highest.Rank, "([.])", " ")
+
+sigPhy = prune_taxa(keep.names, chgPhy) %>%
+  subset_samples(., abx_rx %in% c(0, 1))  %>%
+  prune_samples(sample_sums(.) > 0, .)
+
+
+df = data.frame(otu_table(sigPhy), sample_data(sigPhy)) %>%
+  melt(., id.vars=colnames(sample_data(sigPhy)))
+foo = colsplit(df$variable, "(.)", c("Genus", "Species"))
+df = data.frame(cbind(df, foo))
+df = subset(df, value !=0)
+
+Figure3D = ggplot(df, aes(as.factor(chg_conc), value, color=variable, group=variable)) + geom_point() + 
+  facet_wrap(~variable, scales="free") + geom_smooth(method="lm") +
+  theme_classic() + theme(legend.position = "none")+
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) + scale_y_log10()
+
+
+ggsave(Figure3D, file="~/Desktop/candida_auris_rush/manuscript/NatureMedicine_revision/Figure3d.pdf", device="pdf",
+       width = 10, height = 10)
+```
+
+
+Repeat this analysis but this time use an even more stringent filter
+```{r, fig.height=4, fig.width=4}
+#add a variable testing for nas in chg conc' we'll use this to subset the data
+sample_data(bac_match)$chg_conc_yn = is.na(sample_data(bac_match)$chg_conc)
+sample_data(its_match)$chg_conc_yn = is.na(sample_data(its_match)$chg_conc)
+
+#get rid of the tree - bacteria
+otus = otu_table(bac_match)
+map = sample_data(bac_match)
+tax = bac_match@tax_table@.Data
+bac_match = merge_phyloseq(otus, map, tax_table(tax))
+
+#get rid of the tree - fungal
+otus = otu_table(its_match)
+map = sample_data(its_match)
+tax = its_match@tax_table@.Data
+its_match = merge_phyloseq(otus, map, tax_table(tax))
+
+
+#subset the its table to eliminate noisy taxa; otherwise model fails
+library(DESeq2);library(genefilter)
+filtergroup = genefilter::filterfun(genefilter::kOverA(k=20, A=10)) #k = number of samples; A = abundance
+#filter  taxa 
+        filtPhy = filter_taxa(its_match, filtergroup, prune=TRUE) 
+        filtPhy = prune_taxa(taxa_sums(filtPhy) > 0, filtPhy) 
+        filt_its = subset_samples(filtPhy, Unique_ptid != 32)
+
+#generate a combined fungal/bacterial table so we can adjust pvalues in the regression appropriately
+#get the number of taxa
+phy = merge_phyloseq(bac_match, filt_its)      
+ntaxa(phy)
+nsamples(phy)
+
+
+top50 = names(sort(taxa_sums(phy), TRUE)[1:50])
+phy50 = prune_taxa(top50, phy) %>%
+  prune_samples(sample_sums(.) > 0, .)
+
+
+```
+
+analysis on top 50 taxa
+```{r}
+
+#subset the phyloseq object on samples with chg conc, specific sites shown in panel a, and clr transform
+chgPhy= subset_samples(phy50, chg_conc_yn =="FALSE") %>% 
+  transform_sample_counts(., function(x) compositions::clr(x)) %>% 
+  subset_samples(., SiteID %in% c("Tw", "Fg", "Ic", "An", "Ax"))
+
+
+set.seed(78927)
+#make a map for the regression
+map = data.frame(sample_data(chgPhy)) %>%
+  dplyr::select(., c("chg_conc", "Unique_ptid", "SiteID", "Survey_Period"))
+
+#log transform chg conc
+map$chg_conc = log2(1+map$chg_conc)
+
+#convert site and survey period to numeric
+map$SiteID = as.numeric(factor(map$SiteID))
+map$Survey_Period = as.numeric(as.character(map$Survey_Period))
+map = data.frame(scale(map))
+
+#get the otu table of the centered log ratio table
+otus = data.frame(otu_table(chgPhy))
+
+attach(map)
+all=data.frame(cbind(otus, map))
+
+#set up empty lists
+mod <- list()
+out <- list()
+adjp <- list()
+
+#https://stackoverflow.com/questions/57590176/adjust-p-values-obtained-with-lmertestlmer-for-multiple-comparisons
+adjMC <- function( model_name ) {
+  model_glht <- glht(model_name)
+  model_MCadj <- summary(model_glht, test = adjusted('holm')) # Bonferroni-Holm 
+  return(model_MCadj)
+}
+
+library(multcomp)
+for(i in names(otus)[-1]){
+  mod[[i]] <- lmerTest::lmer(get(i) ~ chg_conc  + SiteID +
+                               (1 | Unique_ptid / Survey_Period  ), 
+      data = all)
+  adjp[[i]]  = adjMC(mod[[i]])
+  out[[i]] = broom.mixed::tidy(adjp[[i]], conf.int = TRUE, .name_repair = "unique")
+}
+keep = colnames(bac_match@tax_table@.Data)[1:8]
+tax = data.frame(filt_its@tax_table@.Data) %>%
+  dplyr::select(., all_of(keep))
+out = out %>% map_dfr(~ .x %>% as_tibble(), .id = "Highest.Rank") 
+out$Highest.Rank = str_replace_all(out$Highest.Rank, "([.])", " ")
+
+df = data.frame(out) %>%
+  plyr::join(tax) %>%
+  subset(., contrast=="chg_conc")  
+
+tax.df = df
+
+#make a volcano plot
+pal <- brewer.pal(n = 4, name = 'Set1')
+df$adj.p.value = as.numeric(as.character(df$adj.p.value))
+my.annotation = subset(df, adj.p.value  < 0.05)
+
+df$Highest.Rank = as.character(as.factor(df$Highest.Rank))
+df$neglog = -log10(df$adj.p.value)
+df$neglog  = ifelse(df$neglog=="Inf", 12, df$neglog)
+      
+## Create a column to indicate which genes to label
+df$significance = ifelse(df$adj.p.value < 0.05, "significant", "not")
+
+#plot figure 3c
+SupplementaryFigureTop50 = ggplot(df) +
+  geom_point(aes(x = estimate, y = neglog,
+                                          color=significance), alpha=0.5) +
+  geom_text_repel(data=subset(df, adj.p.value < 0.05 & estimate > 0.25 | adj.p.value < 0.05 & estimate < -0.25)
+                  , aes(x = estimate, y = neglog, label = Highest.Rank),size=4) +
+  xlab("Regression Coefficient") + 
+  ylab("-log10 adjusted p-value")  +
+  xlim(-1.2, 1.2)  +
+  geom_vline(xintercept = -0.2, linetype='dashed', color="gray") + 
+  geom_vline(xintercept = 0.2, linetype='dashed', color="gray") +
+  theme_classic() +
+  scale_color_manual(values=c("#377EB8" ,"#4DAF4A"))+
+    theme(text = element_text(size=10),
+        axis.text.x = element_text(angle=0, hjust=1)) + theme(legend.position = "none") +
+  scale_y_continuous(label=comma)
+  
+SupplementaryFigureTop50
+
+```
+
+
+```{r}
+phy50Sig = subset_taxa(phy50, Highest.Rank %in% c("Providencia stuartii"   , "Proteus mirabilis", 
+                                                 "Staphylococcus pettenkoferi"  ,   "Anaerococcus octavius"  ,
+                                                 "Candida tropicalis"  , "Malassezia slooffiae"  , "Saccharomyces cerevisiae" ,
+                                                 "Morganella morganii" ,"Campylobacter ureolyticus"  ))
+
+df = data.frame(otu_table(phy50Sig), sample_data(phy50Sig)) %>%
+  melt(., id.vars=colnames(sample_data(phy50Sig)))
+df$corr.direction = ifelse(df$variable %in% c("Providencia.stuartii" , "Proteus.mirabilis", "Candida.tropicalis" ,
+                                               "Saccharomyces.cerevisiae", "Morganella.morganii" ), "positive", "negative")
+
+
+
+p = ggplot(df, aes(variable, value, fill=corr.direction)) + geom_boxplot() + scale_y_log10() + geom_point() +
+  stat_compare_means(ref.group = "Providencia.stuartii")      
+                                                    
+p = ggplot(df, aes(corr.direction, value, fill=corr.direction)) + geom_boxplot() + scale_y_log10() + geom_point() +
+  stat_compare_means()      
+
+p = ggplot(df, aes(value, fill=corr.direction)) + geom_histogram() + scale_x_log10()
+
+#https://cran.r-project.org/web/packages/distributions3/vignettes/two-sample-z-test.html
+negatives = subset(df, corr.direction="negative")
+negatives$clr = compositions::clr(negatives$value)
+positives = subset(df, corr.direction="positive")
+positives$clr = compositions::clr(positives$value)
+
+delta_0 <- 0
+
+# by assumption
+sigma_sq_1 <- 3
+sigma_sq_2 <- 2
+
+n_1 <- length(negatives)
+n_2 <- length(positives)
+
+# calculate the z-statistic
+z_stat <- (mean(negatives$value) - mean(positives$value) - delta_0) / 
+  sqrt(sigma_sq_1 / n_1 + sigma_sq_2 / n_2)
+
+z_stat
+#> [1] -0.3756527
+
+library(distributions3)
+
+Z <- Normal(0, 1)  # make a standard normal r.v.
+1 - cdf(Z, 0.376) + cdf(Z, -0.376)
+
+
+
+1 - cdf(Z, abs(z_stat)) + cdf(Z, -abs(z_stat))
+
+```
+
+
+
+p
+
+
+#### Render Figure 3
+
+Figure 3: High concentrations of CHG reduce the likelihood of colonization, but are rarely achieved. a) Gardner Altman estimation plot comparing the mean difference in CHG concentrations (ug/mL) across all body sites. Upper panel: scatterplot of CHG concentration plotted as a function of body site (Ic: Inguinal Crease; An: Perianus; Fg: Fingertips; Ax: Axilla; Ne: Neck; Tw: Toeweb) for survey 1. Lower Panel: point estimates for the mean difference between CHG concentration (ug/mL) at each body site and the Ic, the site reaching the highest average CHG dosage. Error bars encompass the 95% confidence interval surrounding each estimate while the histogram reflects the sampling distribution from a nonparametric bootstrap. b) Each point represents the odds of C. auris colonization from a logistic mixed effects model plotted against CHG concentration (ug/mL). Error bars encompass 95% confidence intervals. The solid horizontal lines demarcate the odds of colonization per respective group while the dashed lines encompass the 95% CI surrounding each estimate. c) Volcano plot of statistical significance (-Log adjusted P-value) against the regression coefficients from the linear mixed effects models. Each point represents a regression coefficient for a bacterial or fungal species. The vertical lines demarcate regression coefficients of -0.2 and 0.2. Species having Holm adjusted p-values < 0.05 are highlighted in green while non-significant taxa are in blue. Species exhibiting a positive association with CHG concentration (estimate > 0.2, Holm adjusted p < 0.05)  include Providencia stuartii, Proteus mirabilis, Candida tropicalis, Saccharomyces cerevisiae and Morganella morganii. Species exhibiting a negative correlation with CHG (estimate < -0.2, Holm adjusted p < 0.05) include Staphylococcus pettenkoferi, Anaerococcus octavius, Malassezia slooffiae, and Campylobacter ureolyticus.
+```{r, fig.width=8, fig.height=8}
+cowplot::plot_grid(plot(Figure3A, axes.title.fontsize = 10), Figure3B, Figure3C,  Figure3D,
+                   labels = "auto", label_size = 10, label_x = 0, hjust = 0, scale=0.9)
+
+
+ggsave(cowplot::plot_grid(plot(Figure3A, axes.title.fontsize = 10), Figure3B, Figure3C, Figure3D,
+                   labels = "auto", label_size = 10, label_x = 0, hjust = 0, scale=0.9),
+file="~/Desktop/candida_auris_rush/manuscript/NatureMedicine_revision/Figure3.pdf", device="pdf", width = 12, height = 10)
+```
+
+
+
+### What are the version numbers of all packages and ultilies used in this script?
+```{r}
+sessionInfo()
+```
+
