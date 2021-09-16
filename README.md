@@ -1,8 +1,10 @@
 # candida_auris
 
 Nature Medicine volume 27, pages 1401–1409 (2021)
+
 https://www.nature.com/articles/s41591-021-01383-w 
-pmid:  34155414
+
+- pmid:  34155414
 
 **Title: Integrated genomic, epidemiologic investigation of Candida auris skin colonization in a skilled nursing facility**
 
