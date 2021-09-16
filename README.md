@@ -1,6 +1,8 @@
 # candida_auris
 
-**Provisional Acceptance at Nature Medicine, April 2021**
+Nature Medicine volume 27, pages 1401–1409 (2021)
+https://www.nature.com/articles/s41591-021-01383-w 
+pmid:  34155414
 
 **Title: Integrated genomic, epidemiologic investigation of Candida auris skin colonization in a skilled nursing facility**
 
@@ -34,7 +36,5 @@ Stanley2, Pamela B Bell2, Sangeetha Baskaran2, Clay Deming1, Qiong Chen1, Sean C
 
 
 **Abstract**
-Candida auris is a fungal pathogen of high concern due to its ability to cause healthcare-associated infections and outbreaks, resistance to antimicrobials and disinfectants, and persistence on human skin and in the inanimate environment. To inform surveillance and future mitigation strategies, we defined the extent of skin colonization and explored the microbiome associated with C. auris colonization. We collected swab specimens and clinical data at 3 times points from 57 residents (up to 10 body sites each) of a ventilator-capable skilled nursing facility with endemic C. auris and routine chlorhexidine gluconate (CHG) bathing. Integrating microbial-genomic and epidemiologic data revealed occult C. auris colonization of multiple body sites not targeted commonly for screening. High concentrations of CHG were associated with suppression of C. auris growth but not with deleterious perturbation of commensal microbes. Modeling human mycobiome dynamics provided insight into underlying alterations to the skin fungal community as a possible modifiable risk factor for acquisition and persistence of C. auris. Failure to detect C. auris colonization may reduce the effectiveness of infection prevention measures that target colonized residents, highlighting the importance of universal strategies to reduce C. auris transmission. 
-
-
+Candida auris is a fungal pathogen of high concern due to its ability to cause healthcare-associated infections and outbreaks, its resistance to antimicrobials and disinfectants and its persistence on human skin and in the inanimate environment. To inform surveillance and future mitigation strategies, we defined the extent of skin colonization and explored the microbiome associated with C. auris colonization. We collected swab specimens and clinical data at three times points between January and April 2019 from 57 residents (up to ten body sites each) of a ventilator-capable skilled nursing facility with endemic C. auris and routine chlorhexidine gluconate (CHG) bathing. Integrating microbial-genomic and epidemiologic data revealed occult C. auris colonization of multiple body sites not targeted commonly for screening. High concentrations of CHG were associated with suppression of C. auris growth but not with deleterious perturbation of commensal microbes. Modeling human mycobiome dynamics provided insight into underlying alterations to the skin fungal community as a possible modifiable risk factor for acquisition and persistence of C. auris. Failure to detect the extensive, disparate niches of C. auris colonization may reduce the effectiveness of infection-prevention measures that target colonized residents, highlighting the importance of universal strategies to reduce C. auris transmission.
 This repository contains the code and the data needed to replicate the findings presented in the main manuscript, which were performed by Diana Proctor. Analyses, including those presented in Table 1 and Figure 3b, which were performed by coauthors at Rush University are not included herein.
